@@ -1,1 +1,1 @@
-# streamlit-SGresaleHDB
+Refer to (https://gel-sgresalehdb.streamlit.app/) for details.
