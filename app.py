@@ -100,9 +100,10 @@ if len(date_range) == 2:
 
 st.header("Filtered Results")
 st.write(
-    f"Results are from Jan 2017 to May 2026 Last updated: 16 May 2026\n 
-    Data source: [Data.gov.sg](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view)\n 
-    Matching rows: {len(filtered_df):,} | Columns: {len(filtered_df.columns)}")
+    f"Dataset: Jan 2017 to May 2026 (Last updated: 16 May 2026)\n"
+    f"Data source: [Data.gov.sg](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view)\n"
+    f"Matching rows: {len(filtered_df):,} | Columns: {len(filtered_df.columns)}"
+)   # ← closing parenthesis of st.write()
 st.dataframe(filtered_df, width="stretch")
 
 
