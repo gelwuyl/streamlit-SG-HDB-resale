@@ -216,12 +216,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Custom
-/data
+lesson.md
 
 # Ignore Conda environment files
 environment.yml
-
-# Ignore data files (if you create a data/ folder later)
-data/
-
-lesson.md
+.ds_store
