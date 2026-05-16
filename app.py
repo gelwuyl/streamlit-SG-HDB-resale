@@ -5,7 +5,7 @@ from datetime import datetime
 
 print(f"🟢 Rerun at: {datetime.now()}")
 
-DATA_PATH = "./data/Resaleflatprices_registrationdate_Jan2017_16May2026.csv"
+DATA_PATH = "./data/ResaleflatpricesbasedonregistrationdatefromJan2017onwards.csv"
 
 # df = pd.read_csv(DATA_PATH)
 # Convert the 'month' column to datetime format because it is read as object/string by default
