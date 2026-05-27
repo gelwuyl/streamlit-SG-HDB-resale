@@ -221,3 +221,6 @@ lesson.md
 # Ignore Conda environment files
 environment.yml
 .ds_store
+
+# melano
+meltano-resale/
