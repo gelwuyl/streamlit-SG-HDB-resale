@@ -1,26 +1,45 @@
-import streamlit as st
+import os
+import json
 import pandas as pd
+import streamlit as st
 import plotly.express as px
 from datetime import datetime
+from google.cloud import bigquery
 
-print(f"🟢 Rerun at: {datetime.now()}")
+# -------------------------------------------------
+# 1️⃣  Secret handling
+# -------------------------------------------------
+PROJECT_ID = os.getenv("GCP_PROJECT_ID") or st.secrets.get("gcp_project_id")
+CRED_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON") or st.secrets.get(
+    "google_credentials_json")
 
-DATA_PATH = "./data/ResaleflatpricesbasedonregistrationdatefromJan2017onwards.csv"
+client = bigquery.Client(
+    project=PROJECT_ID,
+    credentials=json.loads(CRED_JSON) if CRED_JSON else None
+)
 
-# df = pd.read_csv(DATA_PATH)
-# Convert the 'month' column to datetime format because it is read as object/string by default
-# If the data had been cleaned earlier, this step might not be necessary
-# df["month"] = pd.to_datetime(df["month"])
+# -------------------------------------------------
+# 2️⃣  Query the BigQuery table
+# -------------------------------------------------
+TABLE_REF = f"`resale.public_resale_flat_prices_from_jan_2017`"
+query = f"""
+    SELECT
+        month,
+        town,
+        flat_type,
+        block,
+        street_name,
+        storey_range,
+        floor_area_sqm,
+        flat_model,
+        lease_commence_date,
+        remaining_lease,
+        resale_price
+    FROM {TABLE_REF}
+"""
 
-
-@st.cache_data
-def load_data(path):
-    df = pd.read_csv(path)
-    df["month"] = pd.to_datetime(df["month"])
-    return df
-
-
-df = load_data(DATA_PATH)
+df = client.query(query).to_dataframe()
+df["month"] = pd.to_datetime(df["month"])
 
 # Sets the page configuration
 # You can set the page title and layout here
