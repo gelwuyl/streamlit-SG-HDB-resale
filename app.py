@@ -23,15 +23,24 @@ creds_path = os.getenv("GCP_SERVICE_ACCOUNT_PATH") or st.secrets.get(
     "gcp_service_account_path", None          # Return None, not a fallback file
 )
 
-# b) If the secret that contains the *full* JSON is present, write it to a temporary file
+# b) If the secret that contains the *full* JSON is present, validate and write it to a temporary file
 if "gcp_service_account_json" in st.secrets:
-    # Create a temporary file that lives only for the duration of this process
+    # Validate JSON structure first – this will raise if the JSON is malformed
+    import json
+    try:
+        json_obj = json.loads(st.secrets["gcp_service_account_json"])
+    except json.JSONDecodeError as e:
+        st.error(
+            f"⚠️  The secret `gcp_service_account_json` is not valid JSON: {e}")
+        st.stop()
+    # Write the validated JSON to a temporary file with proper escaping
+    import json as json_mod
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-    temp_file.write(st.secrets["gcp_service_account_json"].encode("utf-8"))
+    json_mod.dump(json_obj, temp_file, indent=2)
     temp_file.close()
     creds_path = temp_file.name               # Use the temp file path
 else:
-# c) If a path was provided but the file does not exist, error out with a clear message
+    # c) If a path was provided but the file does not exist, error out with a clear message
     if creds_path and not os.path.isfile(creds_path):
         st.error(
             f"⚠️  The service‑account file path `{creds_path}` does not exist. "
