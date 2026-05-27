@@ -11,25 +11,35 @@ import tempfile
 # -------------------------------------------------
 # 1️⃣  Secret handling
 # -------------------------------------------------
-# Project ID from secrets
-PROJECT_ID = os.getenv("GCP_PROJECT_ID") or st.secrets.get("gcp_project_id")
-
 # Load service‑account credentials
 # Get project ID from secrets
 PROJECT_ID = os.getenv("GCP_PROJECT_ID") or st.secrets.get("gcp_project_id")
 
-# Determine path to service‑account JSON
+# ------------------------------------------------------------------
+# 2️⃣  Determine where the service‑account JSON should live
+# ------------------------------------------------------------------
+# a) Path that can be overridden via an env‑var or a secret (for local testing)
 creds_path = os.getenv("GCP_SERVICE_ACCOUNT_PATH") or st.secrets.get(
-    "gcp_service_account_path", "service_account.json"
+    "gcp_service_account_path", None          # Return None, not a fallback file
 )
 
-# If the secret containing the full JSON is present, write it to a temporary file
+# b) If the secret that contains the *full* JSON is present, write it to a temporary file
 if "gcp_service_account_json" in st.secrets:
-    # Create a temporary file that persists for the duration of the process
+    # Create a temporary file that lives only for the duration of this process
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
     temp_file.write(st.secrets["gcp_service_account_json"].encode("utf-8"))
     temp_file.close()
-    creds_path = temp_file.name
+    creds_path = temp_file.name               # Use the temp file path
+else:
+# c) If a path was provided but the file does not exist, error out with a clear message
+    if creds_path and not os.path.isfile(creds_path):
+        st.error(
+            f"⚠️  The service‑account file path `{creds_path}` does not exist. "
+            "Either add the file to the repo (and ignore it with .gitignore) "
+            "or provide the secret `gcp_service_account_json`."
+        )
+        st.stop()   # Halt the app – we cannot continue without credentials
+    # If we reach here, `creds_path` already points to a real file on disk.
 
 # Load credentials and create BigQuery client
 credentials = service_account.Credentials.from_service_account_file(creds_path)
