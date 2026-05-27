@@ -34,14 +34,17 @@ def load_credentials():
         json_bytes = base64.b64decode(st.secrets["gcp_credentials_b64"])
         json_str = json_bytes.decode("utf-8")
 
-        # Write JSON string directly to temp file (preserves exact format)
+        # Parse JSON to convert \n escape sequences to actual newlines
+        json_obj = json.loads(json_str)
+
+        # Write with proper formatting - ensure newlines in private_key are real
         temp_file = tempfile.NamedTemporaryFile(
             delete=False, suffix=".json", mode='w', encoding='utf-8'
         )
-        temp_file.write(json_str)
+        json.dump(json_obj, temp_file, indent=2, ensure_ascii=False)
         temp_file.close()
 
-        # Load credentials from temp file
+        # Load credentials
         credentials = service_account.Credentials.from_service_account_file(
             temp_file.name
         )
