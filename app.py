@@ -21,22 +21,23 @@ TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 
 
 def load_credentials():
-    """Load credentials from JSON secret"""
-    if "gcp_credentials_json" not in st.secrets:
+    """Load credentials from Base64-encoded secret"""
+    if "gcp_credentials_b64" not in st.secrets:
         st.error(
             "❌ Missing GCP credentials. "
-            "Add `gcp_credentials_json` to Streamlit secrets."
+            "Add `gcp_credentials_b64` to Streamlit secrets."
         )
         st.stop()
 
     try:
-        # Get raw JSON string from secret (no Base64 encoding)
-        json_str = st.secrets["gcp_credentials_json"]
+        # Decode Base64 to get JSON string
+        json_bytes = base64.b64decode(st.secrets["gcp_credentials_b64"])
+        json_str = json_bytes.decode("utf-8")
 
-        # Parse JSON
+        # Parse JSON (this converts \n escape sequences to actual newlines)
         json_obj = json.loads(json_str)
 
-        # Write parsed JSON to temp file with proper formatting
+        # Write parsed JSON to temp file
         temp_file = tempfile.NamedTemporaryFile(
             delete=False, suffix=".json", mode='w', encoding='utf-8'
         )
@@ -51,6 +52,8 @@ def load_credentials():
         return credentials
     except Exception as e:
         st.error(f"❌ Error loading credentials: {e}")
+        import traceback
+        st.error(traceback.format_exc())
         st.stop()
 
 
