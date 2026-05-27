@@ -6,6 +6,7 @@ import plotly.express as px
 from datetime import datetime
 from google.cloud import bigquery
 from google.oauth2 import service_account
+import tempfile
 
 # -------------------------------------------------
 # 1️⃣  Secret handling
@@ -14,14 +15,31 @@ from google.oauth2 import service_account
 PROJECT_ID = os.getenv("GCP_PROJECT_ID") or st.secrets.get("gcp_project_id")
 
 # Load service‑account credentials
-creds_path = os.getenv("GCP_SERVICE_ACCOUNT_PATH") or st.secrets.get("gcp_service_account_path") or "service_account.json"
+# Get project ID from secrets
+PROJECT_ID = os.getenv("GCP_PROJECT_ID") or st.secrets.get("gcp_project_id")
+
+# Determine path to service‑account JSON
+creds_path = os.getenv("GCP_SERVICE_ACCOUNT_PATH") or st.secrets.get(
+    "gcp_service_account_path", "service_account.json"
+)
+
+# If the secret containing the full JSON is present, write it to a temporary file
+if "gcp_service_account_json" in st.secrets:
+    # Create a temporary file that persists for the duration of the process
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+    temp_file.write(st.secrets["gcp_service_account_json"].encode("utf-8"))
+    temp_file.close()
+    creds_path = temp_file.name
+
+# Load credentials and create BigQuery client
 credentials = service_account.Credentials.from_service_account_file(creds_path)
 client = bigquery.Client(project=PROJECT_ID, credentials=credentials)
 
 # Debug: print secrets (will only show up in Streamlit logs)
 st.write("🔐 GCP_PROJECT_ID from secrets:", st.secrets.get("gcp_project_id"))
-st.write("🔐 GOOGLE_CREDENTIALS_JSON length:", len(
-    st.secrets.get("google_credentials_json", "")))
+# Optionally show length of the raw JSON secret (for debugging)
+# st.write("🔐 GOOGLE_CREDENTIALS_JSON length:", len(
+#     st.secrets.get("google_credentials_json", "")))
 
 # -------------------------------------------------
 # 2️⃣  Query the BigQuery table
