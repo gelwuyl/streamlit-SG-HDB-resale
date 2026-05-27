@@ -33,13 +33,12 @@ def load_credentials():
         # Decode Base64 to get JSON string
         json_str = base64.b64decode(
             st.secrets["gcp_credentials_b64"]).decode("utf-8")
-        json_obj = json.loads(json_str)
 
-        # Write to temp file (required by Google Cloud library)
+        # Write JSON string directly to temp file (preserves \n in private_key)
         temp_file = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".json", mode='w'
+            delete=False, suffix=".json", mode='w', encoding='utf-8'
         )
-        json.dump(json_obj, temp_file, indent=2)
+        temp_file.write(json_str)
         temp_file.close()
 
         # Load credentials from temp file
