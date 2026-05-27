@@ -1,7 +1,6 @@
 import os
 import json
 import base64
-import tempfile
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -29,57 +28,59 @@ def load_data():
 
     # Try to load from BigQuery first
     try:
-        # Check if credentials are available
-        if "gcp_credentials_b64" in st.secrets:
-            # Decode Base64 to get JSON string
-            json_bytes = base64.b64decode(st.secrets["gcp_credentials_b64"])
-            json_str = json_bytes.decode("utf-8")
+        # 1. Fetch credentials block from Streamlit's secrets framework
+        try:
+            b64_creds = st.secrets["gcp_credentials_b64"]
+            project_id = st.secrets["gcp_project_id"]
+        except KeyError:
+            st.error(
+                "Missing secrets configurations. Please check your online Streamlit dashboard.")
+            st.stop()
 
-            # Parse JSON
-            json_obj = json.loads(json_str)
+        # 2. Decode the base64 string back into the original raw JSON string
+        decoded_bytes = base64.b64decode(b64_creds)
+        decoded_str = decoded_bytes.decode("utf-8")
 
-            # Write to temp file
-            temp_file = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".json", mode='w', encoding='utf-8'
-            )
-            json.dump(json_obj, temp_file, indent=2, ensure_ascii=False)
-            temp_file.close()
+        # 3. Parse the JSON string into a native Python dictionary object
+        creds_info = json.loads(decoded_str)
 
-            # Load credentials and create client
-            credentials = service_account.Credentials.from_service_account_file(
-                temp_file.name
-            )
-            client = bigquery.Client(
-                project=PROJECT_ID,
-                credentials=credentials
-            )
+        # 4. Generate Google credentials object from the dictionary
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_info)
 
-            # Build table reference and query
-            table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-            query = f"""
-                SELECT
-                    month,
-                    town,
-                    flat_type,
-                    block,
-                    street_name,
-                    storey_range,
-                    floor_area_sqm,
-                    flat_model,
-                    lease_commence_date,
-                    remaining_lease,
-                    resale_price
-                FROM `{table_ref}`
-            """
+        # 5. Connect to the BigQuery client engine
+        client = bigquery.Client(credentials=credentials, project=project_id)
 
-            df = client.query(query).to_dataframe()
-            df["month"] = pd.to_datetime(df["month"])
+        # 6. Build table reference and query
+        table_ref = f"{project_id}.{DATASET_ID}.{TABLE_ID}"
+        query = f"""
+            SELECT
+                month,
+                town,
+                flat_type,
+                block,
+                street_name,
+                storey_range,
+                floor_area_sqm,
+                flat_model,
+                lease_commence_date,
+                remaining_lease,
+                resale_price
+            FROM `{table_ref}`
+        """
 
-            st.info("✅ Data loaded from BigQuery (Meltano pipeline)")
-            return df
+        df = client.query(query).to_dataframe()
+        df["month"] = pd.to_datetime(df["month"])
 
+        st.info("✅ Data loaded from BigQuery (Meltano pipeline)")
+        return df
+
+    except KeyError as ke:
+        # Missing secrets
+        st.warning(f"⚠️ Missing secret configuration: {ke}")
+        st.info("📄 Falling back to local CSV data file...")
     except Exception as bq_error:
-        # BigQuery failed, will fallback to CSV
+        # BigQuery failed
         st.warning(f"⚠️ BigQuery failed: {bq_error}")
         st.info("📄 Falling back to local CSV data file...")
 
