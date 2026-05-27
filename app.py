@@ -5,84 +5,100 @@ import tempfile
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-from datetime import datetime
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # -------------------------------------------------
-# 1️⃣  Secret handling - BASE64 APPROACH (Streamlit Cloud)
+# 1️⃣  GCP Configuration (matches Meltano setup)
 # -------------------------------------------------
-PROJECT_ID = os.getenv("GCP_PROJECT_ID") or st.secrets.get("gcp_project_id")
+PROJECT_ID = "gen-lang-client-0767762328"
+DATASET_ID = "resale"
+TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 
-creds_path = None
+# -------------------------------------------------
+# 2️⃣  Load BigQuery Credentials
+# -------------------------------------------------
 
-# If Base64-encoded JSON is in secrets
-if "gcp_service_account_json_b64" in st.secrets:
+
+def load_credentials():
+    """Load credentials from Base64-encoded secret"""
+    if "gcp_credentials_b64" not in st.secrets:
+        st.error(
+            "❌ Missing GCP credentials. "
+            "Add `gcp_credentials_b64` to Streamlit secrets."
+        )
+        st.stop()
+
     try:
-        # Decode Base64 to get original JSON string
+        # Decode Base64 to get JSON string
         json_str = base64.b64decode(
-            st.secrets["gcp_service_account_json_b64"]).decode("utf-8")
+            st.secrets["gcp_credentials_b64"]).decode("utf-8")
         json_obj = json.loads(json_str)
 
         # Write to temp file (required by Google Cloud library)
         temp_file = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".json", mode='w')
+            delete=False, suffix=".json", mode='w'
+        )
         json.dump(json_obj, temp_file, indent=2)
         temp_file.close()
-        creds_path = temp_file.name
+
+        # Load credentials from temp file
+        credentials = service_account.Credentials.from_service_account_file(
+            temp_file.name
+        )
+
+        return credentials
     except Exception as e:
-        st.error(f"❌ Error decoding credentials: {e}")
+        st.error(f"❌ Error loading credentials: {e}")
         st.stop()
 
-# If file path is provided (for local testing)
-elif "gcp_service_account_path" in st.secrets:
-    creds_path = st.secrets["gcp_service_account_path"]
-    if not os.path.isfile(creds_path):
-        st.error(f"⚠️ Service account file not found: {creds_path}")
-        st.stop()
 
-# No credentials found
-if not creds_path:
-    st.error(
-        "❌ No GCP credentials found. Add `gcp_service_account_json_b64` to Streamlit secrets.")
-    st.stop()
+# Load credentials
+credentials = load_credentials()
 
-# Create BigQuery client
+# -------------------------------------------------
+# 3️⃣  Create BigQuery Client & Query Data
+# -------------------------------------------------
 try:
-    credentials = service_account.Credentials.from_service_account_file(
-        creds_path)
-    client = bigquery.Client(project=PROJECT_ID, credentials=credentials)
+    client = bigquery.Client(
+        project=PROJECT_ID,
+        credentials=credentials
+    )
+
+    # Build table reference
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+
+    # Query data
+    query = f"""
+        SELECT
+            month,
+            town,
+            flat_type,
+            block,
+            street_name,
+            storey_range,
+            floor_area_sqm,
+            flat_model,
+            lease_commence_date,
+            remaining_lease,
+            resale_price
+        FROM `{table_ref}`
+    """
+
+    df = client.query(query).to_dataframe()
+    df["month"] = pd.to_datetime(df["month"])
+
 except Exception as e:
-    st.error(f"❌ Failed to create BigQuery client: {e}")
+    st.error(f"❌ BigQuery error: {e}")
     st.stop()
 
-# -------------------------------------------------
-# 2️⃣  Query the BigQuery table
-# -------------------------------------------------
-TABLE_REF = f"`resale.public_resale_flat_prices_from_jan_2017`"
-query = f"""
-    SELECT
-        month,
-        town,
-        flat_type,
-        block,
-        street_name,
-        storey_range,
-        floor_area_sqm,
-        flat_model,
-        lease_commence_date,
-        remaining_lease,
-        resale_price
-    FROM {TABLE_REF}
-"""
 
-df = client.query(query).to_dataframe()
-df["month"] = pd.to_datetime(df["month"])
-
+# -------------------------------------------------
+# 4️⃣  Dashboard Setup (rest of your code remains the same)
+# -------------------------------------------------
 # Sets the page configuration
 # You can set the page title and layout here
 st.set_page_config(page_title="HDB Resale Dashboard", layout="wide")
-
 st.title("🏠 Singapore HDB Resale Dashboard")
 # st.caption("Code-along: building a usable dashboard from real resale transactions.")
 
