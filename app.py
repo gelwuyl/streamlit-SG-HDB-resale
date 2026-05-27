@@ -1,64 +1,60 @@
 import os
 import json
+import base64
+import tempfile
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 from datetime import datetime
 from google.cloud import bigquery
 from google.oauth2 import service_account
-import tempfile
 
 # -------------------------------------------------
-# 1️⃣  Secret handling
+# 1️⃣  Secret handling - BASE64 APPROACH (Streamlit Cloud)
 # -------------------------------------------------
-# Load service‑account credentials
-# Get project ID from secrets
 PROJECT_ID = os.getenv("GCP_PROJECT_ID") or st.secrets.get("gcp_project_id")
 
-# ------------------------------------------------------------------
-# 2️⃣  Determine where the service‑account JSON should live
-# ------------------------------------------------------------------
-# a) Path that can be overridden via an env‑var or a secret (for local testing)
-creds_path = os.getenv("GCP_SERVICE_ACCOUNT_PATH") or st.secrets.get(
-    "gcp_service_account_path", None          # Return None, not a fallback file
-)
+creds_path = None
 
-# b) If the secret that contains the *full* JSON is present, validate and write it to a temporary file
-if "gcp_service_account_json" in st.secrets:
-    # Validate JSON structure first – this will raise if the JSON is malformed
-    import json
+# If Base64-encoded JSON is in secrets
+if "gcp_service_account_json_b64" in st.secrets:
     try:
-        json_obj = json.loads(st.secrets["gcp_service_account_json"])
-    except json.JSONDecodeError as e:
-        st.error(
-            f"⚠️  The secret `gcp_service_account_json` is not valid JSON: {e}")
+        # Decode Base64 to get original JSON string
+        json_str = base64.b64decode(
+            st.secrets["gcp_service_account_json_b64"]).decode("utf-8")
+        json_obj = json.loads(json_str)
+
+        # Write to temp file (required by Google Cloud library)
+        temp_file = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".json", mode='w')
+        json.dump(json_obj, temp_file, indent=2)
+        temp_file.close()
+        creds_path = temp_file.name
+    except Exception as e:
+        st.error(f"❌ Error decoding credentials: {e}")
         st.stop()
-    # Write the validated JSON to a temporary file with proper escaping
-    import json as json_mod
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-    json_mod.dump(json_obj, temp_file, indent=2)
-    temp_file.close()
-    creds_path = temp_file.name               # Use the temp file path
-else:
-    # c) If a path was provided but the file does not exist, error out with a clear message
-    if creds_path and not os.path.isfile(creds_path):
-        st.error(
-            f"⚠️  The service‑account file path `{creds_path}` does not exist. "
-            "Either add the file to the repo (and ignore it with .gitignore) "
-            "or provide the secret `gcp_service_account_json`."
-        )
-        st.stop()   # Halt the app – we cannot continue without credentials
-    # If we reach here, `creds_path` already points to a real file on disk.
 
-# Load credentials and create BigQuery client
-credentials = service_account.Credentials.from_service_account_file(creds_path)
-client = bigquery.Client(project=PROJECT_ID, credentials=credentials)
+# If file path is provided (for local testing)
+elif "gcp_service_account_path" in st.secrets:
+    creds_path = st.secrets["gcp_service_account_path"]
+    if not os.path.isfile(creds_path):
+        st.error(f"⚠️ Service account file not found: {creds_path}")
+        st.stop()
 
-# Debug: print secrets (will only show up in Streamlit logs)
-st.write("🔐 GCP_PROJECT_ID from secrets:", st.secrets.get("gcp_project_id"))
-# Optionally show length of the raw JSON secret (for debugging)
-# st.write("🔐 GOOGLE_CREDENTIALS_JSON length:", len(
-#     st.secrets.get("google_credentials_json", "")))
+# No credentials found
+if not creds_path:
+    st.error(
+        "❌ No GCP credentials found. Add `gcp_service_account_json_b64` to Streamlit secrets.")
+    st.stop()
+
+# Create BigQuery client
+try:
+    credentials = service_account.Credentials.from_service_account_file(
+        creds_path)
+    client = bigquery.Client(project=PROJECT_ID, credentials=credentials)
+except Exception as e:
+    st.error(f"❌ Failed to create BigQuery client: {e}")
+    st.stop()
 
 # -------------------------------------------------
 # 2️⃣  Query the BigQuery table
