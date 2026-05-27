@@ -18,6 +18,11 @@ client = bigquery.Client(
     credentials=json.loads(CRED_JSON) if CRED_JSON else None
 )
 
+# Debug: print secrets (will only show up in Streamlit logs)
+st.write("🔐 GCP_PROJECT_ID from secrets:", st.secrets.get("gcp_project_id"))
+st.write("🔐 GOOGLE_CREDENTIALS_JSON length:", len(
+    st.secrets.get("google_credentials_json", "")))
+
 # -------------------------------------------------
 # 2️⃣  Query the BigQuery table
 # -------------------------------------------------
