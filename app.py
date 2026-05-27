@@ -16,85 +16,101 @@ DATASET_ID = "resale"
 TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 
 # -------------------------------------------------
-# 2️⃣  Load BigQuery Credentials
+# 2️⃣  Load Data - Try BigQuery first, fallback to CSV
 # -------------------------------------------------
 
 
-def load_credentials():
-    """Load credentials from Base64-encoded secret"""
-    if "gcp_credentials_b64" not in st.secrets:
-        st.error(
-            "❌ Missing GCP credentials. "
-            "Add `gcp_credentials_b64` to Streamlit secrets."
-        )
-        st.stop()
-
-    try:
-        # Decode Base64 to get JSON string
-        json_bytes = base64.b64decode(st.secrets["gcp_credentials_b64"])
-        json_str = json_bytes.decode("utf-8")
-
-        # Parse JSON to convert \n escape sequences to actual newlines
-        json_obj = json.loads(json_str)
-
-        # Write with proper formatting - ensure newlines in private_key are real
-        temp_file = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".json", mode='w', encoding='utf-8'
-        )
-        json.dump(json_obj, temp_file, indent=2, ensure_ascii=False)
-        temp_file.close()
-
-        # Load credentials
-        credentials = service_account.Credentials.from_service_account_file(
-            temp_file.name
-        )
-
-        return credentials
-    except Exception as e:
-        st.error(f"❌ Error loading credentials: {e}")
-        import traceback
-        st.error(traceback.format_exc())
-        st.stop()
-
-
-# Load credentials
-credentials = load_credentials()
-
-# -------------------------------------------------
-# 3️⃣  Create BigQuery Client & Query Data
-# -------------------------------------------------
-try:
-    client = bigquery.Client(
-        project=PROJECT_ID,
-        credentials=credentials
-    )
-
-    # Build table reference
-    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-
-    # Query data
-    query = f"""
-        SELECT
-            month,
-            town,
-            flat_type,
-            block,
-            street_name,
-            storey_range,
-            floor_area_sqm,
-            flat_model,
-            lease_commence_date,
-            remaining_lease,
-            resale_price
-        FROM `{table_ref}`
+@st.cache_data
+def load_data():
+    """
+    Load HDB resale data from BigQuery or CSV fallback.
+    Priority: BigQuery > CSV file
     """
 
-    df = client.query(query).to_dataframe()
-    df["month"] = pd.to_datetime(df["month"])
+    # Try to load from BigQuery first
+    try:
+        # Check if credentials are available
+        if "gcp_credentials_b64" in st.secrets:
+            # Decode Base64 to get JSON string
+            json_bytes = base64.b64decode(st.secrets["gcp_credentials_b64"])
+            json_str = json_bytes.decode("utf-8")
 
-except Exception as e:
-    st.error(f"❌ BigQuery error: {e}")
-    st.stop()
+            # Parse JSON
+            json_obj = json.loads(json_str)
+
+            # Write to temp file
+            temp_file = tempfile.NamedTemporaryFile(
+                delete=False, suffix=".json", mode='w', encoding='utf-8'
+            )
+            json.dump(json_obj, temp_file, indent=2, ensure_ascii=False)
+            temp_file.close()
+
+            # Load credentials and create client
+            credentials = service_account.Credentials.from_service_account_file(
+                temp_file.name
+            )
+            client = bigquery.Client(
+                project=PROJECT_ID,
+                credentials=credentials
+            )
+
+            # Build table reference and query
+            table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+            query = f"""
+                SELECT
+                    month,
+                    town,
+                    flat_type,
+                    block,
+                    street_name,
+                    storey_range,
+                    floor_area_sqm,
+                    flat_model,
+                    lease_commence_date,
+                    remaining_lease,
+                    resale_price
+                FROM `{table_ref}`
+            """
+
+            df = client.query(query).to_dataframe()
+            df["month"] = pd.to_datetime(df["month"])
+
+            st.info("✅ Data loaded from BigQuery (Meltano pipeline)")
+            return df
+
+    except Exception as bq_error:
+        # BigQuery failed, will fallback to CSV
+        st.warning(f"⚠️ BigQuery failed: {bq_error}")
+        st.info("📄 Falling back to local CSV data file...")
+
+    # Fallback: Load from CSV file
+    try:
+        csv_path = os.path.join(
+            os.path.dirname(__file__),
+            "data",
+            "ResaleflatpricesbasedonregistrationdatefromJan2017onwards.csv"
+        )
+
+        if not os.path.exists(csv_path):
+            st.error(f"❌ CSV file not found: {csv_path}")
+            st.stop()
+
+        df = pd.read_csv(csv_path)
+
+        # Convert month to datetime
+        if 'month' in df.columns:
+            df["month"] = pd.to_datetime(df["month"])
+
+        st.info("✅ Data loaded from local CSV file")
+        return df
+
+    except Exception as csv_error:
+        st.error(f"❌ Failed to load CSV: {csv_error}")
+        st.stop()
+
+
+# Load data (BigQuery or CSV)
+df = load_data()
 
 
 # -------------------------------------------------
