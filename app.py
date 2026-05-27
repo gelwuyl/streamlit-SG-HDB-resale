@@ -5,18 +5,18 @@ import streamlit as st
 import plotly.express as px
 from datetime import datetime
 from google.cloud import bigquery
+from google.oauth2 import service_account
 
 # -------------------------------------------------
 # 1️⃣  Secret handling
 # -------------------------------------------------
+# Project ID from secrets
 PROJECT_ID = os.getenv("GCP_PROJECT_ID") or st.secrets.get("gcp_project_id")
-CRED_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON") or st.secrets.get(
-    "google_credentials_json")
 
-client = bigquery.Client(
-    project=PROJECT_ID,
-    credentials=json.loads(CRED_JSON) if CRED_JSON else None
-)
+# Load service‑account credentials
+creds_path = os.getenv("GCP_SERVICE_ACCOUNT_PATH") or st.secrets.get("gcp_service_account_path") or "service_account.json"
+credentials = service_account.Credentials.from_service_account_file(creds_path)
+client = bigquery.Client(project=PROJECT_ID, credentials=credentials)
 
 # Debug: print secrets (will only show up in Streamlit logs)
 st.write("🔐 GCP_PROJECT_ID from secrets:", st.secrets.get("gcp_project_id"))
