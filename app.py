@@ -29,27 +29,27 @@ def load_data():
     # Try to load from BigQuery first
     try:
         # 1. Fetch credentials block from Streamlit's secrets framework
-        try:
-            b64_creds = st.secrets["gcp_credentials_b64"]
-            project_id = st.secrets["gcp_project_id"]
-        except KeyError:
-            st.error(
-                "Missing secrets configurations. Please check your online Streamlit dashboard.")
-            st.stop()
+        # try:
+        #     b64_creds = st.secrets["gcp_credentials_b64"]
+        #     project_id = 
+        # except KeyError:
+        #     st.error(
+        #         "Missing secrets configurations. Please check your online Streamlit dashboard.")
+        #     st.stop()
 
-        # 2. Decode the base64 string back into the original raw JSON string
-        decoded_bytes = base64.b64decode(b64_creds)
-        decoded_str = decoded_bytes.decode("utf-8")
+        # # 2. Decode the base64 string back into the original raw JSON string
+        # decoded_bytes = base64.b64decode(b64_creds)
+        # decoded_str = decoded_bytes.decode("utf-8")
 
         # 3. Parse the JSON string into a native Python dictionary object
-        creds_info = json.loads(decoded_str)
+        creds_info = json.loads(st.secrets["gcp_service_account"])
 
         # 4. Generate Google credentials object from the dictionary
         credentials = service_account.Credentials.from_service_account_info(
             creds_info)
 
         # 5. Connect to the BigQuery client engine
-        client = bigquery.Client(credentials=credentials, project=project_id)
+        client = bigquery.Client(credentials=credentials, project="gen-lang-client-0767762328")
 
         # 6. Build table reference and query
         table_ref = f"{project_id}.{DATASET_ID}.{TABLE_ID}"
