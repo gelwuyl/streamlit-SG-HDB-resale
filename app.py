@@ -167,7 +167,7 @@ def load_data():
             "latest_entry": df["month"].max() if "month" in df.columns else None,
         }
 
-        st.info("✅ Data loaded from BigQuery (Meltano pipeline)")
+        st.info("✅ Data loaded from BigQuery (Dagster pipeline)")
         return df, metadata
 
     except KeyError as ke:
