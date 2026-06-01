@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import pandas as pd
 import streamlit as st
@@ -18,45 +19,73 @@ TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 # -------------------------------------------------
 
 
+def _normalize_service_account_json(raw_text: str) -> str:
+    """Convert raw newlines in the private_key field into escaped \n for JSON parsing."""
+    if '"private_key"' not in raw_text:
+        return raw_text
+
+    def _escape_private_key(match):
+        text = match.group(2)
+        escaped = text.replace("\n", "\\n")
+        return f"{match.group(1)}{escaped}{match.group(3)}"
+
+    return re.sub(
+        r'("private_key"\s*:\s*")(.+?)(")',
+        _escape_private_key,
+        raw_text,
+        flags=re.DOTALL,
+    )
+
+
 def get_bigquery_client():
     """Return a BigQuery client and dataset/table config from Streamlit secrets."""
-    if "bigquery" in st.secrets:
-        bq = st.secrets["bigquery"]
-        key_path = bq.get("key_path")
-        if not key_path:
-            raise KeyError("bigquery.key_path is missing in Streamlit secrets")
-
-        creds = service_account.Credentials.from_service_account_file(key_path)
-        project_id = bq.get("project") or creds.project_id or PROJECT_ID
-        dataset_id = bq.get("dataset") or st.secrets.get(
-            "dataset_id") or DATASET_ID
-        table_id = bq.get("table") or st.secrets.get("table_id") or TABLE_ID
-        return bigquery.Client(credentials=creds, project=project_id), project_id, dataset_id, table_id
-
-    if "gcp_service_account" in st.secrets:
-        creds_raw = st.secrets["gcp_service_account"]
-        if isinstance(creds_raw, str):
-            creds_info = json.loads(creds_raw)
-        elif isinstance(creds_raw, dict):
-            creds_info = creds_raw
-        else:
-            raise ValueError(
-                "gcp_service_account must be a JSON string or object in Streamlit secrets")
-
-        credentials = service_account.Credentials.from_service_account_info(
-            creds_info)
-        project_id = (
-            creds_info.get("project_id")
-            or st.secrets.get("gcp_project_id")
-            or PROJECT_ID
+    if "gcp_service_account" not in st.secrets:
+        raise KeyError(
+            "Missing gcp_service_account. Add the inline service account JSON secret to Streamlit Cloud settings."
         )
-        dataset_id = st.secrets.get("dataset_id") or DATASET_ID
-        table_id = st.secrets.get("table_id") or TABLE_ID
-        return bigquery.Client(credentials=credentials, project=project_id), project_id, dataset_id, table_id
 
-    raise KeyError(
-        "No BigQuery auth configuration found. Add a [bigquery] section with key_path or a gcp_service_account value to .streamlit/secrets.toml"
+    creds_raw = st.secrets["gcp_service_account"]
+    if isinstance(creds_raw, str):
+        try:
+            creds_info = json.loads(creds_raw)
+        except json.JSONDecodeError:
+            normalized = _normalize_service_account_json(creds_raw)
+            try:
+                creds_info = json.loads(normalized)
+            except json.JSONDecodeError as err:
+                raise ValueError(
+                    "Invalid JSON in gcp_service_account. "
+                    "Use a valid JSON string or store gcp_service_account as a TOML object in Streamlit secrets."
+                ) from err
+    elif isinstance(creds_raw, dict):
+        creds_info = creds_raw
+    else:
+        raise ValueError(
+            "gcp_service_account must be a JSON string or object in Streamlit secrets"
+        )
+
+    private_key = creds_info.get("private_key")
+    if not private_key or "BEGIN PRIVATE KEY" not in private_key:
+        raise ValueError(
+            "Invalid gcp_service_account private_key. "
+            "Paste the full PEM private key text into the secret, not a placeholder or truncated value."
+        )
+    if "..." in private_key:
+        raise ValueError(
+            "The gcp_service_account private_key contains placeholder text '...'. "
+            "Use the full service account private key from your JSON file."
+        )
+
+    credentials = service_account.Credentials.from_service_account_info(
+        creds_info)
+    project_id = (
+        creds_info.get("project_id")
+        or st.secrets.get("gcp_project_id")
+        or PROJECT_ID
     )
+    dataset_id = st.secrets.get("dataset_id") or DATASET_ID
+    table_id = st.secrets.get("table_id") or TABLE_ID
+    return bigquery.Client(credentials=credentials, project=project_id), project_id, dataset_id, table_id
 
 
 @st.cache_data
