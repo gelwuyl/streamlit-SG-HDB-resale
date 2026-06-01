@@ -116,6 +116,20 @@ def _normalize_bigquery_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df[expected_columns]
 
 
+def format_date(value) -> str:
+    """Format a date-like value as a human-readable string."""
+    if value is None or pd.isna(value):
+        return "unknown"
+    if isinstance(value, str):
+        try:
+            value = pd.to_datetime(value)
+        except Exception:
+            return value
+    if hasattr(value, "strftime"):
+        return value.strftime("%d %B %Y")
+    return str(value)
+
+
 @st.cache_data
 def load_data():
     """
@@ -148,8 +162,13 @@ def load_data():
         df = client.query(query).to_dataframe()
         df = _normalize_bigquery_dataframe(df)
 
+        metadata = {
+            "source": "BigQuery",
+            "latest_entry": df["month"].max() if "month" in df.columns else None,
+        }
+
         st.info("✅ Data loaded from BigQuery (Meltano pipeline)")
-        return df
+        return df, metadata
 
     except KeyError as ke:
         # Missing secrets
@@ -170,12 +189,16 @@ def load_data():
 
         df = pd.read_csv(csv_path)
 
-        # Convert month to datetime
         if 'month' in df.columns:
             df["month"] = pd.to_datetime(df["month"])
 
+        metadata = {
+            "source": "CSV",
+            "latest_entry": df["month"].max() if "month" in df.columns else None,
+        }
+
         st.info("✅ Data loaded from local CSV file")
-        return df
+        return df, metadata
 
     except Exception as csv_error:
         st.error(f"❌ Failed to load CSV: {csv_error}")
@@ -183,7 +206,7 @@ def load_data():
 
 
 # Load data (BigQuery or CSV)
-df = load_data()
+df, data_meta = load_data()
 
 
 # -------------------------------------------------
@@ -191,11 +214,6 @@ df = load_data()
 # -------------------------------------------------
 # Page config is already set above; this section focuses on title and dashboard layout.
 st.title("🏠 Singapore HDB Resale Dashboard")
-
-# Optional: Uncomment the lines below to display a data summary header.
-# st.header("Dataset Summary")
-# st.write(f"Rows loaded: {len(df):,} | Columns: {len(df.columns)}")
-
 st.sidebar.header("Filters")
 
 # Get unique towns and flat types for the multi-select widgets
@@ -248,8 +266,11 @@ if len(date_range) == 2:
         pd.to_datetime(start_date), pd.to_datetime(end_date))]
 
 st.header("Filtered Results")
+latest_entry = format_date(data_meta.get("latest_entry"))
 st.write(
-    f"Dataset: Jan 2017 to May 2026 (Last updated: 16 May 2026) | Data source: [Data.gov.sg](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view)\n\n"
+    f"Dataset: {date_min:%b %Y} to {date_max:%b %Y} | "
+    f"Latest entry: {latest_entry} | "
+    f"Data source: {data_meta.get('source', 'Unknown')}\n\n"
     f"Matching rows: {len(filtered_df):,} | Columns: {len(filtered_df.columns)}"
 )
 st.dataframe(filtered_df, width="stretch")
