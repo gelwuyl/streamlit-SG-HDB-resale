@@ -1,6 +1,5 @@
 import os
 import json
-import base64
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -28,28 +27,36 @@ def load_data():
 
     # Try to load from BigQuery first
     try:
-        # 1. Fetch credentials block from Streamlit's secrets framework
-        # try:
-        #     b64_creds = st.secrets["gcp_credentials_b64"]
-        #     project_id = 
-        # except KeyError:
-        #     st.error(
-        #         "Missing secrets configurations. Please check your online Streamlit dashboard.")
-        #     st.stop()
+        # 1. Fetch the GCP service account JSON string from Streamlit secrets
+        #    This is the raw JSON payload pasted into the Cloud secrets editor.
+        if "gcp_service_account" not in st.secrets:
+            st.error(
+                "Missing `gcp_service_account` in Streamlit secrets."
+                " Add it to .streamlit/secrets.toml for local use or to Streamlit Cloud secrets."
+            )
+            st.stop()
 
-        # # 2. Decode the base64 string back into the original raw JSON string
-        # decoded_bytes = base64.b64decode(b64_creds)
-        # decoded_str = decoded_bytes.decode("utf-8")
-
-        # 3. Parse the JSON string into a native Python dictionary object
-        creds_info = json.loads(st.secrets["gcp_service_account"])
+        creds_raw = st.secrets["gcp_service_account"]
+        if isinstance(creds_raw, str):
+            creds_info = json.loads(creds_raw)
+        elif isinstance(creds_raw, dict):
+            creds_info = creds_raw
+        else:
+            raise ValueError(
+                "gcp_service_account must be a JSON string in Streamlit secrets"
+            )
 
         # 4. Generate Google credentials object from the dictionary
         credentials = service_account.Credentials.from_service_account_info(
             creds_info)
+        project_id = (
+            creds_info.get("project_id")
+            or st.secrets.get("gcp_project_id")
+            or PROJECT_ID
+        )
 
-        # 5. Connect to the BigQuery client engine
-        client = bigquery.Client(credentials=credentials, project="gen-lang-client-0767762328")
+        # 5. Create the BigQuery client
+        client = bigquery.Client(credentials=credentials, project=project_id)
 
         # 6. Build table reference and query
         table_ref = f"{project_id}.{DATASET_ID}.{TABLE_ID}"
