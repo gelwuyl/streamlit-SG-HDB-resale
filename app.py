@@ -18,6 +18,47 @@ TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 # -------------------------------------------------
 
 
+def get_bigquery_client():
+    """Return a BigQuery client and dataset/table config from Streamlit secrets."""
+    if "bigquery" in st.secrets:
+        bq = st.secrets["bigquery"]
+        key_path = bq.get("key_path")
+        if not key_path:
+            raise KeyError("bigquery.key_path is missing in Streamlit secrets")
+
+        creds = service_account.Credentials.from_service_account_file(key_path)
+        project_id = bq.get("project") or creds.project_id or PROJECT_ID
+        dataset_id = bq.get("dataset") or st.secrets.get(
+            "dataset_id") or DATASET_ID
+        table_id = bq.get("table") or st.secrets.get("table_id") or TABLE_ID
+        return bigquery.Client(credentials=creds, project=project_id), project_id, dataset_id, table_id
+
+    if "gcp_service_account" in st.secrets:
+        creds_raw = st.secrets["gcp_service_account"]
+        if isinstance(creds_raw, str):
+            creds_info = json.loads(creds_raw)
+        elif isinstance(creds_raw, dict):
+            creds_info = creds_raw
+        else:
+            raise ValueError(
+                "gcp_service_account must be a JSON string or object in Streamlit secrets")
+
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_info)
+        project_id = (
+            creds_info.get("project_id")
+            or st.secrets.get("gcp_project_id")
+            or PROJECT_ID
+        )
+        dataset_id = st.secrets.get("dataset_id") or DATASET_ID
+        table_id = st.secrets.get("table_id") or TABLE_ID
+        return bigquery.Client(credentials=credentials, project=project_id), project_id, dataset_id, table_id
+
+    raise KeyError(
+        "No BigQuery auth configuration found. Add a [bigquery] section with key_path or a gcp_service_account value to .streamlit/secrets.toml"
+    )
+
+
 @st.cache_data
 def load_data():
     """
@@ -27,39 +68,10 @@ def load_data():
 
     # Try to load from BigQuery first
     try:
-        # 1. Fetch the GCP service account JSON string from Streamlit secrets
-        #    This is the raw JSON payload pasted into the Cloud secrets editor.
-        if "gcp_service_account" not in st.secrets:
-            st.error(
-                "Missing `gcp_service_account` in Streamlit secrets."
-                " Add it to .streamlit/secrets.toml for local use or to Streamlit Cloud secrets."
-            )
-            st.stop()
-
-        creds_raw = st.secrets["gcp_service_account"]
-        if isinstance(creds_raw, str):
-            creds_info = json.loads(creds_raw)
-        elif isinstance(creds_raw, dict):
-            creds_info = creds_raw
-        else:
-            raise ValueError(
-                "gcp_service_account must be a JSON string in Streamlit secrets"
-            )
-
-        # 4. Generate Google credentials object from the dictionary
-        credentials = service_account.Credentials.from_service_account_info(
-            creds_info)
-        project_id = (
-            creds_info.get("project_id")
-            or st.secrets.get("gcp_project_id")
-            or PROJECT_ID
-        )
-
-        # 5. Create the BigQuery client
-        client = bigquery.Client(credentials=credentials, project=project_id)
+        client, project_id, dataset_id, table_id = get_bigquery_client()
 
         # 6. Build table reference and query
-        table_ref = f"{project_id}.{DATASET_ID}.{TABLE_ID}"
+        table_ref = f"{project_id}.{dataset_id}.{table_id}"
         query = f"""
             SELECT
                 month,
@@ -85,10 +97,6 @@ def load_data():
     except KeyError as ke:
         # Missing secrets
         st.warning(f"⚠️ Missing secret configuration: {ke}")
-        st.info("📄 Falling back to local CSV data file...")
-    except Exception as bq_error:
-        # BigQuery failed
-        st.warning(f"⚠️ BigQuery failed: {bq_error}")
         st.info("📄 Falling back to local CSV data file...")
 
     # Fallback: Load from CSV file
