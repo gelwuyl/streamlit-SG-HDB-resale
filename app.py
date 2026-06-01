@@ -7,6 +7,9 @@ import plotly.express as px
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+# Set the page configuration before any Streamlit rendering or messages.
+st.set_page_config(page_title="HDB Resale Dashboard", layout="wide")
+
 # -------------------------------------------------
 # 1️⃣  GCP Configuration (matches Meltano setup)
 # -------------------------------------------------
@@ -88,6 +91,38 @@ def get_bigquery_client():
     return bigquery.Client(credentials=credentials, project=project_id), project_id, dataset_id, table_id
 
 
+def _normalize_bigquery_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize BigQuery results to the same schema and dtype expectations as the CSV fallback."""
+    expected_columns = [
+        "month",
+        "town",
+        "flat_type",
+        "block",
+        "street_name",
+        "storey_range",
+        "floor_area_sqm",
+        "flat_model",
+        "lease_commence_date",
+        "remaining_lease",
+        "resale_price",
+    ]
+
+    df = df.copy()
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    df["month"] = pd.to_datetime(df["month"], errors="coerce")
+
+    for numeric_col in ["resale_price", "floor_area_sqm", "remaining_lease"]:
+        df[numeric_col] = pd.to_numeric(df[numeric_col], errors="coerce")
+
+    if "lease_commence_date" in df.columns:
+        df["lease_commence_date"] = df["lease_commence_date"].astype("string")
+
+    return df[expected_columns]
+
+
 @st.cache_data
 def load_data():
     """
@@ -118,7 +153,7 @@ def load_data():
         """
 
         df = client.query(query).to_dataframe()
-        df["month"] = pd.to_datetime(df["month"])
+        df = _normalize_bigquery_dataframe(df)
 
         st.info("✅ Data loaded from BigQuery (Meltano pipeline)")
         return df
@@ -159,26 +194,14 @@ df = load_data()
 
 
 # -------------------------------------------------
-# 4️⃣  Dashboard Setup (rest of your code remains the same)
+# 4️⃣  Dashboard Setup
 # -------------------------------------------------
-# Sets the page configuration
-# You can set the page title and layout here
-st.set_page_config(page_title="HDB Resale Dashboard", layout="wide")
+# Page config is already set above; this section focuses on title and dashboard layout.
 st.title("🏠 Singapore HDB Resale Dashboard")
-# st.caption("Code-along: building a usable dashboard from real resale transactions.")
 
-# st.header("Dashboard Overview")
-# st.subheader("What this app will show")
-# # Use markdown to create bullet points
-# st.markdown("""
-# - Transaction volume after filtering
-# - Average resale price
-# - Median floor area
-# - Town and flat type trends
-# """)
-
+# Optional: Uncomment the lines below to display a data summary header.
+# st.header("Dataset Summary")
 # st.write(f"Rows loaded: {len(df):,} | Columns: {len(df.columns)}")
-# st.dataframe(df.head(20), width="stretch")
 
 st.sidebar.header("Filters")
 
@@ -207,40 +230,35 @@ price_range = st.sidebar.slider(
     step=10000,
 )
 date_range = st.sidebar.date_input("Month Range", value=(date_min, date_max))
-# Make a copy of the original dataframe to apply filters
+# Keep the original dataset intact and apply filters to a working copy.
 filtered_df = df.copy()
 
-# If the user has selected any towns, filter the dataframe accordingly
+# Filter by selected towns if any are chosen.
 if selected_towns:
     filtered_df = filtered_df[filtered_df["town"].isin(selected_towns)]
 
-# filtered_df["town"] selects the 'town' column from the filtered dataframe
-# .isin(selected_towns) checks if each value in the 'town' column is in the list of selected towns
-# This returns a boolean mask (Series) of True/False values
-# The dataframe is then filtered to include only those rows where the condition is True
+# The .isin() call returns a boolean mask for rows whose town is in the selected list.
 
-# If the user has selected any flat types, filter the dataframe accordingly
+# Filter by selected flat types when present.
 if selected_flat_types:
     filtered_df = filtered_df[filtered_df["flat_type"].isin(
         selected_flat_types)]
 
-# Filter the dataframe based on the selected resale price range
-filtered_df = filtered_df[filtered_df['resale_price'].between(
+# Filter by resale price range using numeric bounds.
+filtered_df = filtered_df[filtered_df["resale_price"].between(
     price_range[0], price_range[1])]
 
-# If the user has selected a date range, filter the dataframe accordingly
+# Apply month range filtering when a valid two-date range is selected.
 if len(date_range) == 2:
-    # unpack values from date_range tuple
     start_date, end_date = date_range
-    filtered_df = filtered_df[filtered_df['month'].between(
+    filtered_df = filtered_df[filtered_df["month"].between(
         pd.to_datetime(start_date), pd.to_datetime(end_date))]
-
 
 st.header("Filtered Results")
 st.write(
     f"Dataset: Jan 2017 to May 2026 (Last updated: 16 May 2026) | Data source: [Data.gov.sg](https://data.gov.sg/datasets/d_8b84c4ee58e3cfc0ece0d773c8ca6abc/view)\n\n"
     f"Matching rows: {len(filtered_df):,} | Columns: {len(filtered_df.columns)}"
-)   # ← closing parenthesis of st.write()
+)
 st.dataframe(filtered_df, width="stretch")
 
 
@@ -258,7 +276,7 @@ st.header("Visual Analysis")
 
 col_left, col_right = st.columns(2)
 
-# Tells Streamlit to put the following content in the left column
+# Place the town pricing chart in the left column for side-by-side layout.
 with col_left:
     st.subheader("Average Resale Price by Town")
     avg_price_by_town = (
@@ -270,7 +288,7 @@ with col_left:
     fig_town = px.bar(avg_price_by_town, x="town", y="resale_price")
     st.plotly_chart(fig_town, width="stretch")
 
-# Tells Streamlit to put the following content in the right column
+# Display flat type transaction breakdown in the right column.
 with col_right:
     st.subheader("Transactions by Flat Type")
     tx_by_flat = (
@@ -292,12 +310,14 @@ trend = (
 fig_trend = px.line(trend, x="month", y="resale_price", markers=True)
 st.plotly_chart(fig_trend, width="stretch")
 
-# with st.expander("View Filtered Transactions"):
-#     st.dataframe(filtered_df, width="stretch", height=350)
-#     csv = filtered_df.to_csv(index=False).encode("utf-8")
-#     st.download_button(
-#         "Download filtered CSV",
-#         data=csv,
-#         file_name="filtered_resale_data.csv",
-#         mime="text/csv",
-#     )
+
+# Optional: Uncomment below to add an expandable section for viewing and downloading filtered transaction data.
+with st.expander("View Filtered Transactions"):
+    st.dataframe(filtered_df, width="stretch", height=350)
+    csv = filtered_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download filtered CSV",
+        data=csv,
+        file_name="filtered_resale_data.csv",
+        mime="text/csv",
+    )
