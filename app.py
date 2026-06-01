@@ -11,14 +11,7 @@ from google.oauth2 import service_account
 st.set_page_config(page_title="HDB Resale Dashboard", layout="wide")
 
 # -------------------------------------------------
-# 1️⃣  GCP Configuration (matches Meltano setup)
-# -------------------------------------------------
-PROJECT_ID = "gen-lang-client-0767762328"
-DATASET_ID = "resale"
-TABLE_ID = "public_resale_flat_prices_from_jan_2017"
-
-# -------------------------------------------------
-# 2️⃣  Load Data - Try BigQuery first, fallback to CSV
+# Load Data - Try BigQuery first, fallback to CSV
 # -------------------------------------------------
 
 
@@ -194,7 +187,7 @@ df = load_data()
 
 
 # -------------------------------------------------
-# 4️⃣  Dashboard Setup
+# Dashboard Setup
 # -------------------------------------------------
 # Page config is already set above; this section focuses on title and dashboard layout.
 st.title("🏠 Singapore HDB Resale Dashboard")
