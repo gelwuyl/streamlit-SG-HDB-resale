@@ -224,4 +224,9 @@ environment.yml
 
 # melano
 meltano-resale/
+
+# markdown files
 CLASSMATE_SETUP.md
+
+# dagster orchestration
+dagster-orchestration/
