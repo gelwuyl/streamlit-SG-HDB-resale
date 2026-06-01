@@ -7,43 +7,48 @@ Live app: [https://gel-sgresalehdb.streamlit.app/](https://gel-sgresalehdb.strea
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Meltano Pipeline (Local)                 │
+│              Initial Setup (Meltano Pipeline)               │
 │  ┌──────────────┐    ┌────────────────┐    ┌─────────────┐ │
 │  │ tap-postgres │───▶│ target-bigquery│───▶│  BigQuery   │ │
 │  │  (Supabase)  │    │   (Meltano)    │    │  Dataset    │ │
-│  └──────────────┘    └────────────────┘    │  resale     │ │
-│                                            └──────┬──────┘ │
-└────────────────────────────────────────────────────┬────────┘
-                                                     │
-                                                     ▼
+│  └──────────────┘    └────────────────┘    └─────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  Streamlit Dashboard (Cloud)                │
+│              Production Pipeline (Dagster)                  │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │              load_data() Function                    │  │
-│  │  ┌────────────────────────────────────────────────┐  │  │
-│  │  │ 1. Try BigQuery First                          │  │  │
-│  │  │    - Check if gcp_credentials_b64 in secrets   │  │  │
-│  │  │    - Decode Base64 → JSON                      │  │  │
-│  │  │    - Create BigQuery Client                    │  │  │
-│  │  │    - Query: resale.public_resale_flat_prices   │  │  │
-│  │  │    - Return df                                 │  │  │
-│  │  └────────────────────────────────────────────────┘  │  │
-│  │                        │                             │  │
-│  │                        ▼ (if fails)                   │  │
-│  │  ┌────────────────────────────────────────────────┐  │  │
-│  │  │ 2. Fallback to CSV                             │  │  │
-│  │  │    - Load: data/Resaleflatpricesbasedon...csv  │  │  │
-│  │  │    - Convert month to datetime                 │  │  │
-│  │  │    - Return df                                 │  │  │
-│  │  └────────────────────────────────────────────────┘  │  │
+│  │              Dagster Orchestration                   │  │
+│  │  Schedule: Daily at 11:59 PM SGT                     │  │
 │  └──────────────────────────────────────────────────────┘  │
-│                            │                                │
-│                            ▼                                │
+│                        │                                   │
+│                        ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              Asset Selection                         │  │
+│  │  • hdb_resale_data_from_csv (manual fallback)        │  │
+│  │  • hdb_resale_data_from_api (incremental fetch)      │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                        │                                   │
+│                        ▼                                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │           Google BigQuery                            │  │
+│  │  • Source: Data.gov.sg API                           │  │
+│  │  • Features: Deduplication, Rate limiting            │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Streamlit Dashboard                        │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  1. Try BigQuery (primary)                           │  │
+│  │  2. Fallback to CSV (if BigQuery fails)              │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                        │                                   │
+│                        ▼                                   │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │              Dashboard Components                    │  │
-│  │    - Filters (town, flat_type, price, date)          │  │
-│  │    - KPI Metrics (transactions, avg, median price)   │  │
-│  │    - Visualizations (bar charts, line trends)        │  │
+│  │  • Filters, KPIs, Visualizations                     │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -51,8 +56,8 @@ Live app: [https://gel-sgresalehdb.streamlit.app/](https://gel-sgresalehdb.strea
 ## 🔧 Configuration
 
 ```python
-# GCP Configuration (matches Meltano setup)
-PROJECT_ID = "gen-lang-client-0767762328"
+# GCP Configuration
+PROJECT_ID = "..."
 DATASET_ID = "resale"
 TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 ```
@@ -61,9 +66,10 @@ TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Meltano Pipeline** | ✅ Working | `meltano run tap-postgres target-bigquery` succeeds |
-| **BigQuery Data** | ✅ Available | Table `resale.public_resale_flat_prices_from_jan_2017` exists |
-| **Streamlit BigQuery** | ❌ Failing | `Invalid private key` error persists |
+| **Meltano Pipeline** | ✅ Working | Initial data setup |
+| **Dagster Pipeline** | ✅ Working | Daily scheduled ingestion |
+| **BigQuery Data** | ✅ Available | Table exists |
+| **Streamlit BigQuery** | ❌ Failing | Connection issue |
 | **Streamlit CSV Fallback** | ✅ Working | Dashboard loads from local CSV |
 | **Overall App** | ✅ Functional | Falls back to CSV when BigQuery fails |
 
@@ -76,7 +82,7 @@ TABLE_ID = "public_resale_flat_prices_from_jan_2017"
   - Transactions by flat type
   - Monthly median resale price trends
 - **Data Sources**: 
-  - Primary: BigQuery (Meltano pipeline)
+  - Primary: BigQuery (Dagster pipeline)
   - Fallback: Local CSV file
 - **Real-time Updates**: Data refreshes on each app run
 
@@ -86,6 +92,7 @@ TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 streamlit-SGhdbresale/
 ├── app.py                 # Main Streamlit application
 ├── data/                  # Local CSV fallback data
+├── dagster-orchestration/ # Dagster pipeline configuration
 ├── meltano-resale/        # Meltano pipeline configuration
 ├── .streamlit/            # Streamlit configuration (secrets.toml)
 ├── requirements.txt       # Python dependencies
