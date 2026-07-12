@@ -1,6 +1,6 @@
 # 🏠 Singapore HDB Resale Dashboard
 
-Live app: [https://gel-sg-hdb-resale.streamlit.app/](https://gel-sgresalehdb.streamlit.app/)
+Live app: [https://gel-sg-hdb-resale.streamlit.app/](https://gel-sg-hdb-resale.streamlit.app/)
 
 
 ## 📊 Data Pipeline Architecture
