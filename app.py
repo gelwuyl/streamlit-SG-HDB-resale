@@ -130,11 +130,15 @@ def format_date(value) -> str:
     return str(value)
 
 
-@st.cache_data
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_data():
     """
     Load HDB resale data from BigQuery or CSV fallback.
     Priority: BigQuery > CSV file
+
+    Cached for 1 hour (ttl=3600) so the dashboard loads fast on repeat
+    visits, and refreshes automatically when new data is available.
+    Use the "🔄 Refresh Data" button in the sidebar to force a reload.
     """
 
     # Try to load from BigQuery first
@@ -208,6 +212,11 @@ def load_data():
 # Load data (BigQuery or CSV)
 df, data_meta = load_data()
 
+# Sidebar refresh button to force re-load (clears the cache)
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
+    st.stop()
 
 # -------------------------------------------------
 # Dashboard Setup

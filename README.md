@@ -7,83 +7,46 @@ Live app: [https://gel-sg-hdb-resale.streamlit.app/](https://gel-sg-hdb-resale.s
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              Initial Setup (Meltano Pipeline)               │
-│  ┌──────────────┐    ┌────────────────┐    ┌─────────────┐ │
-│  │ tap-postgres │───▶│ target-bigquery│───▶│  BigQuery   │ │
-│  │  (Supabase)  │    │   (Meltano)    │    │  Dataset    │ │
-│  └──────────────┘    └────────────────┘    └─────────────┘ │
+│              LOCAL (dev/testing only)                       │
+│  • Meltano: Supabase → BigQuery (initial setup)             │
+│  • Dagster: Data.gov.sg API → BigQuery (local testing)      │
 └─────────────────────────────────────────────────────────────┘
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              Production Pipeline (Dagster)                  │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │              Dagster Orchestration                   │  │
-│  │  Schedule: Daily at 11:59 PM SGT                     │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                        │                                   │
-│                        ▼                                   │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │              Asset Selection                         │  │
-│  │  • hdb_resale_data_from_csv (manual fallback)        │  │
-│  │  • hdb_resale_data_from_api (incremental fetch)      │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                        │                                   │
-│                        ▼                                   │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │           Google BigQuery                            │  │
-│  │  • Source: Data.gov.sg API                           │  │
-│  │  • Features: Deduplication, Rate limiting            │  │
-│  └──────────────────────────────────────────────────────┘  │
+│              CLOUD (production)                             │
+│  GitHub Action (weekly)                                     │
+│  └── scripts/update_bigquery.py                             │
+│        ├── 1. Pull Data.gov.sg API (newest records)         │
+│        ├── 2. Load → BigQuery (MERGE dedup, no duplicates)  │
+│        └── 3. Update → local CSV (dedup, no duplicates)     │
+│              └── Commit CSV back to repo                    │
 └─────────────────────────────────────────────────────────────┘
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                  Streamlit Dashboard                        │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  1. Try BigQuery (primary)                           │  │
-│  │  2. Fallback to CSV (if BigQuery fails)              │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                        │                                   │
-│                        ▼                                   │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │              Dashboard Components                    │  │
-│  │  • Filters, KPIs, Visualizations                     │  │
-│  └──────────────────────────────────────────────────────┘  │
+│  • 1. Try BigQuery (primary)                                │
+│  • 2. Fallback to CSV (if BigQuery fails)                   │
 └─────────────────────────────────────────────────────────────┘
-```
-
-## 🔧 Configuration
-
-```python
-# GCP Configuration
-PROJECT_ID = "..."
-DATASET_ID = "resale"
-TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 ```
 
 ## 📋 Current Status
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Meltano Pipeline** | ✅ Working | Initial data setup |
-| **Dagster Pipeline** | ✅ Working | Daily scheduled ingestion |
+| **Meltano Pipeline** | ✅ Local | Initial data setup (dev only) |
+| **Dagster Pipeline** | ✅ Local | Local testing (dev only) |
+| **GitHub Action** | ✅ Cloud | Weekly scheduled API → BigQuery + CSV |
 | **BigQuery Data** | ✅ Available | Table exists |
-| **Streamlit BigQuery** | ❌ Failing | Connection issue |
-| **Streamlit CSV Fallback** | ✅ Working | Dashboard loads from local CSV |
-| **Overall App** | ✅ Functional | Falls back to CSV when BigQuery fails |
+| **Streamlit App** | ✅ Functional | BigQuery primary, CSV fallback |
 
 ## 🚀 Features
 
 - **Interactive Dashboard**: Filter by town, flat type, price range, and date
 - **Key Metrics**: Transaction count, average/median prices, floor area
-- **Visualizations**: 
-  - Average resale price by town (top 10)
-  - Transactions by flat type
-  - Monthly median resale price trends
-- **Data Sources**: 
-  - Primary: BigQuery (Dagster pipeline)
-  - Fallback: Local CSV file
+- **Visualizations**: Average resale price by town, transactions by flat type, monthly price trends
+- **Data Sources**: BigQuery (primary) → CSV fallback
 - **Real-time Updates**: Data refreshes on each app run
 
 ## 📁 Project Structure
@@ -92,8 +55,12 @@ TABLE_ID = "public_resale_flat_prices_from_jan_2017"
 streamlit-SGhdbresale/
 ├── app.py                 # Main Streamlit application
 ├── data/                  # Local CSV fallback data
-├── dagster-orchestration/ # Dagster pipeline configuration
-├── meltano-resale/        # Meltano pipeline configuration
+├── scripts/
+│   └── update_bigquery.py # Cloud pipeline: API → BigQuery + CSV
+├── .github/workflows/
+│   └── update_bigquery.yml  # Weekly scheduled GitHub Action
+├── dagster-orchestration/ # Dagster pipeline (local dev only)
+├── meltano-resale/        # Meltano pipeline (local dev only)
 ├── .streamlit/            # Streamlit configuration (secrets.toml)
 ├── requirements.txt       # Python dependencies
 └── README.md             # This file
@@ -101,23 +68,40 @@ streamlit-SGhdbresale/
 
 ## 🛠️ Setup Instructions
 
-1. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. **Install dependencies**: `pip install -r requirements.txt`
+2. **Configure Streamlit secrets**: Add `gcp_service_account`, `dataset_id`, `table_id` to `.streamlit/secrets.toml`
+3. **Run locally**: `streamlit run app.py`
+4. **Deploy to Streamlit Cloud**: Push to GitHub, connect, configure secrets
 
-2. **Configure Streamlit secrets** (for BigQuery connection):
-   ```bash
-   # Create .streamlit/secrets.toml for local testing
-   # Add gcp_credentials_b64 and gcp_project_id
-   ```
+## ☁️ Cloud Pipeline (GitHub Action)
 
-3. **Run locally**:
-   ```bash
-   streamlit run app.py
-   ```
+Runs **weekly** (Monday 00:30 UTC / 08:30 SGT) to pull the latest HDB resale data from the Data.gov.sg API into BigQuery and update the local backup CSV. Can also be triggered manually from the **Actions** tab.
 
-4. **Deploy to Streamlit Cloud**:
-   - Push to GitHub repository
-   - Connect to Streamlit Cloud
-   - Configure secrets in dashboard settings
+```
+GitHub Action (weekly)
+  └── scripts/update_bigquery.py
+        ├── 1. Pull Data.gov.sg API (newest records)
+        ├── 2. Load → BigQuery (MERGE dedup, no duplicates)
+        └── 3. Update → local CSV (dedup, no duplicates)
+              └── Commit CSV back to repo
+```
+
+### Setup
+
+Add these GitHub Secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Description |
+|--------|-------------|
+| `GCP_SERVICE_ACCOUNT_JSON` | Full service account JSON (inline) |
+| `GCP_PROJECT_ID` | GCP project id |
+| `GCP_DATASET_ID` | BigQuery dataset (default: `resale`) |
+| `GCP_TABLE_ID` | BigQuery table (default: `public_resale_flat_prices_from_jan_2017`) |
+
+### Local Testing
+
+```bash
+export GOOGLE_CREDENTIALS_PATH=/path/to/service-account.json
+python scripts/update_bigquery.py
+```
+
+The script updates both BigQuery and the local CSV file.
