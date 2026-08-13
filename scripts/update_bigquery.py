@@ -276,15 +276,16 @@ def _load_with_bigquery_dedup(
     print(f"Loaded {load_job.output_rows} records into temp table")
 
     # Build MERGE statement matching on all fields (no natural key available)
+    # NOTE: Use SRC/TGT aliases (NOT "NEW" - it's a reserved keyword in BigQuery)
     join_conditions = [
-        f"NEW.`{field.name}` = EXISTING.`{field.name}`"
+        f"SRC.`{field.name}` = TGT.`{field.name}`"
         for field in schema
     ]
     join_clause = " AND ".join(join_conditions)
 
     merge_query = f"""
-    MERGE `{table_id}` EXISTING
-    USING `{temp_table_id}` NEW
+    MERGE `{table_id}` TGT
+    USING `{temp_table_id}` SRC
     ON {join_clause}
     WHEN NOT MATCHED THEN INSERT ROW
     """
