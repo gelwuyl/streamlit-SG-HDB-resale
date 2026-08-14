@@ -191,6 +191,10 @@ def load_filter_options():
                 MIN(month) AS date_min,
                 MAX(month) AS date_max
             FROM `{table_ref}`
+            WHERE town IS NOT NULL
+              AND TRIM(town) <> ''
+              AND flat_type IS NOT NULL
+              AND TRIM(flat_type) <> ''
         """
 
         row = client.query(query).to_dataframe().iloc[0]
