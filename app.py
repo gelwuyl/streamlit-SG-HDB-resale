@@ -280,7 +280,7 @@ def load_data():
                 floor_area_sqm,
                 flat_model,
                 lease_commence_date,
-                remaining_lease,
+                CAST(remaining_lease AS STRING) AS remaining_lease,
                 resale_price
             FROM `{table_ref}`
         """
