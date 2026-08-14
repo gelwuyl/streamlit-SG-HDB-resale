@@ -77,10 +77,10 @@ def get_bigquery_client():
     project_id = (
         creds_info.get("project_id")
         or st.secrets.get("gcp_project_id")
-        or PROJECT_ID
+        or "gen-lang-client-0767762328"
     )
-    dataset_id = st.secrets.get("dataset_id") or DATASET_ID
-    table_id = st.secrets.get("table_id") or TABLE_ID
+    dataset_id = st.secrets.get("dataset_id") or "resale"
+    table_id = st.secrets.get("table_id") or "public_resale_flat_prices_from_jan_2017"
     return bigquery.Client(credentials=credentials, project=project_id), project_id, dataset_id, table_id
 
 
@@ -130,6 +130,87 @@ def format_date(value) -> str:
     return str(value)
 
 
+def get_source_label(source):
+    labels = {
+        "BigQuery": "BigQuery table",
+        "CSV": "local CSV fallback",
+    }
+    return labels.get(source, "Unknown source")
+
+
+def get_csv_path():
+    return os.path.join(
+        os.path.dirname(__file__),
+        "data",
+        "ResaleflatpricesbasedonregistrationdatefromJan2017onwards.csv"
+    )
+
+
+def sort_dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["month"] = pd.to_datetime(df["month"], errors="coerce")
+    return df.sort_values("month", ascending=False, kind="mergesort").reset_index(drop=True)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_filter_options():
+    def csv_options(df):
+        return {
+            "towns": sorted(df["town"].dropna().astype(str).unique().tolist()),
+            "flat_types": sorted(df["flat_type"].dropna().astype(str).unique().tolist()),
+            "min_price": int(df["resale_price"].min()),
+            "max_price": int(df["resale_price"].max()),
+            "date_min": df["month"].min().date(),
+            "date_max": df["month"].max().date(),
+            "source": "CSV",
+        }
+
+    try:
+        client, project_id, dataset_id, table_id = get_bigquery_client()
+        table_ref = f"{project_id}.{dataset_id}.{table_id}"
+        query = f"""
+            SELECT
+                ARRAY_AGG(DISTINCT town) AS towns,
+                ARRAY_AGG(DISTINCT flat_type) AS flat_types,
+                MIN(resale_price) AS min_price,
+                MAX(resale_price) AS max_price,
+                MIN(month) AS date_min,
+                MAX(month) AS date_max
+            FROM `{table_ref}`
+        """
+
+        row = client.query(query).to_dataframe().iloc[0]
+        return {
+            "towns": sorted(row["towns"] or []),
+            "flat_types": sorted(row["flat_types"] or []),
+            "min_price": int(row["min_price"]),
+            "max_price": int(row["max_price"]),
+            "date_min": pd.to_datetime(row["date_min"]).date(),
+            "date_max": pd.to_datetime(row["date_max"]).date(),
+            "source": "BigQuery",
+        }
+
+    except Exception as bq_error:
+        st.warning(f"⚠️ Could not preload filter options from BigQuery: {bq_error}")
+        csv_path = get_csv_path()
+        if not os.path.exists(csv_path):
+            st.error(f"❌ CSV file not found: {csv_path}")
+            st.stop()
+
+        df = pd.read_csv(
+            csv_path,
+            usecols=[
+                "town",
+                "flat_type",
+                "resale_price",
+                "month",
+            ],
+        )
+        if 'month' in df.columns:
+            df["month"] = pd.to_datetime(df["month"])
+        return csv_options(df)
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_data():
     """
@@ -171,7 +252,7 @@ def load_data():
             "latest_entry": df["month"].max() if "month" in df.columns else None,
         }
 
-        st.info("✅ Data loaded from BigQuery (Dagster pipeline)")
+        st.info(f"✅ Data loaded from {get_source_label(metadata.get('source'))}")
         return df, metadata
 
     except KeyError as ke:
@@ -189,7 +270,7 @@ def load_data():
 
         if not os.path.exists(csv_path):
             st.error(f"❌ CSV file not found: {csv_path}")
-            st.stop()
+            raise RuntimeError(f"CSV file not found: {csv_path}")
 
         df = pd.read_csv(csv_path)
 
@@ -201,20 +282,25 @@ def load_data():
             "latest_entry": df["month"].max() if "month" in df.columns else None,
         }
 
-        st.info("✅ Data loaded from local CSV file")
+        st.info(f"✅ Data loaded from {get_source_label(metadata.get('source'))}")
         return df, metadata
 
     except Exception as csv_error:
         st.error(f"❌ Failed to load CSV: {csv_error}")
-        st.stop()
+        raise RuntimeError(f"Failed to load CSV: {csv_error}") from csv_error
 
 
 # Load data (BigQuery or CSV)
 df, data_meta = load_data()
+df = sort_dataframe_for_display(df)
+
+# Preload filter options once, with BigQuery-first fallback to CSV.
+filter_options = load_filter_options()
 
 # Sidebar refresh button to force re-load (clears the cache)
 if st.sidebar.button("🔄 Refresh Data"):
     st.cache_data.clear()
+    st.session_state.pop("filtered_df", None)
     st.rerun()
     st.stop()
 
@@ -226,16 +312,16 @@ st.title("🏠 Singapore HDB Resale Dashboard")
 st.sidebar.header("Filters")
 
 # Get unique towns and flat types for the multi-select widgets
-unique_towns = sorted(df["town"].dropna().unique())
-unique_flat_types = sorted(df["flat_type"].dropna().unique())
+unique_towns = filter_options["towns"]
+unique_flat_types = filter_options["flat_types"]
 
 # Get min and max resale prices for the slider
-min_price = int(df["resale_price"].min())
-max_price = int(df["resale_price"].max())
+min_price = filter_options["min_price"]
+max_price = filter_options["max_price"]
 
 # Get min and max dates for the date input
-date_min = df["month"].min().date()
-date_max = df["month"].max().date()
+date_min = filter_options["date_min"]
+date_max = filter_options["date_max"]
 
 # Create filter widgets
 selected_towns = st.sidebar.multiselect("Town", unique_towns, default=[])
@@ -250,25 +336,19 @@ price_range = st.sidebar.slider(
     step=10000,
 )
 date_range = st.sidebar.date_input("Month Range", value=(date_min, date_max))
+
 # Keep the original dataset intact and apply filters to a working copy.
 filtered_df = df.copy()
 
-# Filter by selected towns if any are chosen.
 if selected_towns:
     filtered_df = filtered_df[filtered_df["town"].isin(selected_towns)]
 
-# The .isin() call returns a boolean mask for rows whose town is in the selected list.
-
-# Filter by selected flat types when present.
 if selected_flat_types:
-    filtered_df = filtered_df[filtered_df["flat_type"].isin(
-        selected_flat_types)]
+    filtered_df = filtered_df[filtered_df["flat_type"].isin(selected_flat_types)]
 
-# Filter by resale price range using numeric bounds.
 filtered_df = filtered_df[filtered_df["resale_price"].between(
     price_range[0], price_range[1])]
 
-# Apply month range filtering when a valid two-date range is selected.
 if len(date_range) == 2:
     start_date, end_date = date_range
     filtered_df = filtered_df[filtered_df["month"].between(
@@ -276,13 +356,18 @@ if len(date_range) == 2:
 
 st.header("Filtered Results")
 latest_entry = format_date(data_meta.get("latest_entry"))
-st.write(
+source_label = get_source_label(data_meta.get("source"))
+st.caption(
     f"Dataset: {date_min:%b %Y} to {date_max:%b %Y} | "
     f"Latest entry: {latest_entry} | "
-    f"Data source: {data_meta.get('source', 'Unknown')}\n\n"
+    f"Data source: {source_label}\n\n"
     f"Matching rows: {len(filtered_df):,} | Columns: {len(filtered_df.columns)}"
 )
-st.dataframe(filtered_df, width="stretch")
+
+if filtered_df.empty:
+    st.warning("No rows match the current filters. Try widening the date or price range.")
+else:
+    st.dataframe(filtered_df, width="stretch")
 
 
 # KPI Rows
@@ -303,11 +388,12 @@ col_left, col_right = st.columns(2)
 with col_left:
     st.subheader("Average Resale Price by Town")
     avg_price_by_town = (
-        filtered_df.groupby("town", as_index=False)["resale_price"]
-        .mean()
-        .sort_values("resale_price", ascending=False)
-        .head(10)  # Top 10 towns only for clarity
+        filtered_df.groupby("town", as_index=False)["resale_price"].mean()
     )
+    avg_price_by_town = pd.DataFrame(avg_price_by_town)
+    avg_price_by_town = avg_price_by_town.sort_values(
+        by="resale_price", ascending=False
+    ).head(10)  # Top 10 towns only for clarity
     fig_town = px.bar(avg_price_by_town, x="town", y="resale_price")
     st.plotly_chart(fig_town, width="stretch")
 
@@ -318,18 +404,17 @@ with col_right:
         filtered_df.groupby("flat_type", as_index=False)
         .size()
         .rename(columns={"size": "transactions"})
-        .sort_values("transactions", ascending=False)
     )
+    tx_by_flat = tx_by_flat.sort_values(by="transactions", ascending=False)
     fig_flat = px.bar(tx_by_flat, x="flat_type", y="transactions")
     st.plotly_chart(fig_flat, width="stretch")
 
 
 st.subheader("Monthly Median Resale Price")
-trend = (
-    filtered_df.groupby("month", as_index=False)["resale_price"]
-    .median()
-    .sort_values("month")
+trend = pd.DataFrame(
+    filtered_df.groupby("month", as_index=False)["resale_price"].median()
 )
+trend = trend.sort_values(by="month", ascending=False)
 fig_trend = px.line(trend, x="month", y="resale_price", markers=True)
 st.plotly_chart(fig_trend, width="stretch")
 
