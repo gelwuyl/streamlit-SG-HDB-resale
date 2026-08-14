@@ -357,7 +357,13 @@ price_range = st.sidebar.slider(
     value=(min_price, max_price),
     step=10000,
 )
-date_range = st.sidebar.date_input("Month Range", value=(date_min, date_max))
+date_range = st.sidebar.date_input(
+    "Month Range",
+    value=(
+        pd.to_datetime(date_min).strftime("%Y-%m-%d"),
+        pd.to_datetime(date_max).strftime("%Y-%m-%d"),
+    )
+)
 
 # Keep the original dataset intact and apply filters to a working copy.
 filtered_df = df.copy()
