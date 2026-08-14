@@ -200,7 +200,14 @@ def load_filter_options():
         max_price = _bigquery_scalar_to_python(row["max_price"])
         date_min = _bigquery_scalar_to_python(row["date_min"])
         date_max = _bigquery_scalar_to_python(row["date_max"])
-        if min_price is None or max_price is None or date_min is None or date_max is None:
+        if (
+            not towns
+            or not flat_types
+            or min_price is None
+            or max_price is None
+            or date_min is None
+            or date_max is None
+        ):
             raise ValueError("BigQuery filter option query returned empty metadata")
         return {
             "towns": sorted(towns),
