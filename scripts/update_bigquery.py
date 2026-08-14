@@ -42,8 +42,9 @@ from google.oauth2 import service_account
 DATA_GOV_API_URL = "https://data.gov.sg/api/action/datastore_search"
 RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc"
 PAGE_SIZE = 100  # Data.gov.sg API hard limit is 100 records per page
-MAX_RETRIES = 5
-RETRY_DELAY = 1  # seconds, doubles on each retry (exponential backoff)
+MAX_RETRIES = 8
+RETRY_DELAY = 2  # seconds, doubles on each retry (exponential backoff)
+POLITE_DELAY = 0.3  # seconds between API requests to avoid rate limiting
 
 DATASET_ID = os.getenv("GCP_DATASET_ID", "resale")
 TABLE_ID = os.getenv(
@@ -179,8 +180,70 @@ def _get_bigquery_record_count(client: bigquery.Client, table_id: str) -> int:
     return 0
 
 
+def _get_latest_bigquery_month(client: bigquery.Client, table_id: str):
+    """Get the latest month present in the BigQuery table (YYYY-MM).
+
+    Returns None if the table is empty or does not exist.
+    """
+    try:
+        query = f"SELECT MAX(month) as max_month FROM `{table_id}`"
+        for row in client.query(query).result():
+            if row.max_month is not None:
+                # month is a TIMESTAMP/DATE -> format to YYYY-MM
+                return row.max_month.strftime("%Y-%m")
+    except Exception:
+        pass
+    return None
+
+
+def _get_api_total() -> int:
+    """Get the total number of records in the Data.gov.sg API."""
+    api_url = (
+        f"{DATA_GOV_API_URL}?resource_id={RESOURCE_ID}"
+        f"&limit=1"
+    )
+    resp = requests.get(api_url, timeout=60)
+    resp.raise_for_status()
+    return resp.json()["result"].get("total", 0)
+
+
+def _get_api_month_count(month: str) -> int:
+    """Get the count of records for a specific month from the API.
+
+    Uses filter + limit=1 to read the 'total' field for that month.
+    """
+    filters_json = json.dumps({"month": month})
+    api_url = (
+        f"{DATA_GOV_API_URL}?resource_id={RESOURCE_ID}"
+        f"&filters={filters_json}&limit=1"
+    )
+    resp = requests.get(api_url, timeout=60)
+    resp.raise_for_status()
+    return resp.json()["result"].get("total", 0)
+
+
+def _get_bigquery_month_count(client: bigquery.Client, table_id: str, month: str) -> int:
+    """Get the count of records for a specific month in BigQuery.
+
+    Args:
+        month: Month in YYYY-MM format.
+    """
+    query = (
+        f"SELECT COUNT(*) as cnt FROM `{table_id}` "
+        f"WHERE month >= '{month}-01' AND month < '{month}-01' + INTERVAL 1 MONTH"
+    )
+    for row in client.query(query).result():
+        return row.cnt
+    return 0
+
+
 def _fetch_single_page(page: int) -> List[Dict[str, Any]]:
-    """Fetch a single page from the Data.gov.sg API with retry logic."""
+    """Fetch a single page from the Data.gov.sg API with retry logic.
+
+    NOTE: The API's 'page'/'sort' pagination is BROKEN (returns identical
+    records on every page when sorted). We keep this function but it should
+    NOT be used for pagination - use _fetch_month instead.
+    """
     api_url = (
         f"{DATA_GOV_API_URL}?resource_id={RESOURCE_ID}"
         f"&page={page}&page_size={PAGE_SIZE}"
@@ -204,6 +267,67 @@ def _fetch_single_page(page: int) -> List[Dict[str, Any]]:
     response.raise_for_status()
     data = response.json()
     return data["result"]["records"]
+
+
+def _fetch_month(month: str) -> List[Dict[str, Any]]:
+    """Fetch ALL records for a specific month using filter + offset pagination.
+
+    This is the RELIABLE pagination approach for the Data.gov.sg API.
+    The 'sort' parameter with 'page' is broken (repeats records), but
+    'filters' + 'offset' + 'limit' works correctly.
+
+    Args:
+        month: Month in YYYY-MM format (e.g. "2026-07")
+
+    Returns:
+        List of all records for that month.
+    """
+    all_records = []
+    offset = 0
+    limit = 100  # API max per request
+
+    while True:
+        filters_json = json.dumps({"month": month})
+        api_url = (
+            f"{DATA_GOV_API_URL}?resource_id={RESOURCE_ID}"
+            f"&filters={filters_json}&offset={offset}&limit={limit}"
+        )
+        print(f"Fetching {month} offset {offset}...")
+
+        retries = 0
+        retry_delay = RETRY_DELAY
+        response = requests.get(api_url, timeout=60)
+
+        while response.status_code == 429 and retries < MAX_RETRIES:
+            print(
+                f"Rate limited. Retrying in {retry_delay}s "
+                f"(attempt {retries + 1}/{MAX_RETRIES})"
+            )
+            time.sleep(retry_delay)
+            retry_delay *= 2
+            response = requests.get(api_url, timeout=60)
+            retries += 1
+
+        response.raise_for_status()
+        data = response.json()
+        result = data["result"]
+        records = result.get("records", [])
+
+        if not records:
+            break
+
+        all_records.extend(records)
+        print(f"  {month} offset {offset}: {len(records)} records "
+              f"(total: {len(all_records)})")
+
+        offset += limit
+        if len(records) < limit:
+            break
+
+        # Polite delay between requests to avoid rate limiting
+        time.sleep(POLITE_DELAY)
+
+    return all_records
 
 
 def _filter_records_to_schema(
@@ -417,72 +541,84 @@ def main():
     table_exists = bool(existing_schema)
     print(f"Table exists: {table_exists}")
 
-    # 3. Get total records available from the API
-    api_url = (
-        f"{DATA_GOV_API_URL}?resource_id={RESOURCE_ID}"
-        f"&page=1&page_size=1"
-    )
-    resp = requests.get(api_url, timeout=60)
-    resp.raise_for_status()
-    total_api_records = resp.json()["result"].get("total", 0)
-    print(f"Total records in API: {total_api_records}")
+    import datetime
 
-    # 4. Determine how many records to fetch
-    if table_exists:
-        bq_count = _get_bigquery_record_count(client, table_id)
-        print(f"Current records in BigQuery: {bq_count}")
-        new_records_needed = total_api_records - bq_count
-    else:
-        # Table doesn't exist - bootstrap: fetch ALL records
-        bq_count = 0
-        new_records_needed = total_api_records
-        print("Bootstrap mode: table missing, will fetch ALL records")
+    # 3. Determine which months have missing/incomplete data.
+    #    Strategy: probe the API across ALL months (from dataset start
+    #    2017-01 to today). For each month, compare API count vs BigQuery
+    #    count. Fetch any month where BigQuery count < API count.
+    #    This handles both new data AND retroactive corrections.
+    import datetime
 
-    print(f"New records to fetch: {new_records_needed}")
-
-    if new_records_needed <= 0:
-        print("BigQuery is up to date. Nothing to do.")
-        return
-
-    # 5. Fetch the newest records (from the end of the dataset)
-    #    Fetch a bit more than needed to account for any gaps.
-    pages_needed = (new_records_needed + PAGE_SIZE - 1) // PAGE_SIZE
-    pages_to_fetch = int(pages_needed * 1.2) + 1  # 20% buffer
-    last_page = (total_api_records + PAGE_SIZE - 1) // PAGE_SIZE
-    start_page = max(1, last_page - pages_to_fetch + 1)
-
-    print(
-        f"Fetching pages {start_page} to {last_page} "
-        f"({pages_to_fetch} pages)"
-    )
-
+    today = datetime.date.today()
+    months_to_fetch = []
     all_records = []
-    for page in range(start_page, last_page + 1):
-        records = _fetch_single_page(page)
-        if not records:
-            break
-        all_records.extend(records)
-        print(f"  Page {page}: {len(records)} records (total: {len(all_records)})")
+
+    # Scan from 2017-01 up to today's month
+    start = datetime.date(2017, 1, 1)
+    probe = today.replace(day=1)
+    total_months = ((probe.year - start.year) * 12 + probe.month - start.month) + 1
+    print(f"Scanning {total_months} months from 2017-01 to {probe.strftime('%Y-%m')}...")
+
+    while probe >= start:
+        month_str = probe.strftime("%Y-%m")
+
+        # Get API count for this month
+        try:
+            api_count = _get_api_month_count(month_str)
+        except Exception:
+            api_count = 0
+
+        if api_count == 0:
+            # No data for this month - move backwards
+            probe = (probe - datetime.timedelta(days=1)).replace(day=1)
+            continue
+
+        # Get BigQuery count for this month
+        if table_exists:
+            bq_count = _get_bigquery_month_count(client, table_id, month_str)
+        else:
+            bq_count = 0
+
+        if bq_count < api_count:
+            missing = api_count - bq_count
+            print(f"Month {month_str}: API={api_count}, BigQuery={bq_count} "
+                  f"(missing {missing}) → fetching")
+            months_to_fetch.append(month_str)
+            month_records = _fetch_month(month_str)
+            print(f"  → Fetched {len(month_records)} records for {month_str}")
+            all_records.extend(month_records)
+        else:
+            print(f"Month {month_str}: API={api_count}, BigQuery={bq_count} (OK)")
+
+        # Move backwards one month
+        probe = (probe - datetime.timedelta(days=1)).replace(day=1)
+
+    if not months_to_fetch:
+        print("BigQuery is up to date with the API.")
+        return
 
     if not all_records:
         print("No records fetched from API.")
         return
 
-    # 6. Ensure the table exists (create it from records if needed)
+    print(f"\nTotal records fetched: {len(all_records)}")
+
+    # 4. Ensure the table exists (create it from records if needed)
     schema = _ensure_table_exists(client, table_id, all_records)
     print(f"Schema ready: {len(schema)} fields")
 
-    # 7. Filter and convert records
+    # 5. Filter and convert records
     records = _filter_records_to_schema(all_records, schema)
     records = _convert_records_for_bigquery(records, schema)
     print(f"Prepared {len(records)} records for loading")
 
-    # 8. Load with deduplication (MERGE)
+    # 6. Load with deduplication (MERGE)
     rows_inserted = _load_with_bigquery_dedup(
         client, table_id, schema, records
     )
 
-    # 9. Update the local backup CSV with the same new records (deduplicated)
+    # 7. Update the local backup CSV with the same new records (deduplicated)
     #    Use the schema-filtered records (before BigQuery month conversion)
     #    so the CSV keeps the YYYY-MM format.
     csv_records = _filter_records_to_schema(all_records, schema)

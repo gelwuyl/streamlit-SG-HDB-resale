@@ -231,5 +231,7 @@ CLASSMATE_SETUP.md
 # dagster orchestration
 dagster-orchestration/
 
-# one-time bootstrap script (keep local only, not for cloud deployment)
+# one-time maintenance scripts (keep local only, not for cloud deployment)
 scripts/bootstrap_bigquery.py
+scripts/cleanup_data.py
+scripts/download_full_csv.py
