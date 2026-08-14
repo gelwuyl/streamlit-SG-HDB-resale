@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -150,106 +149,32 @@ def get_csv_path():
     )
 
 
-def _bigquery_array_to_list(value):
-    if isinstance(value, pd.Series):
-        return value.dropna().astype(str).tolist()
-    if isinstance(value, pd.DataFrame):
-        return value.dropna().astype(str).iloc[:, 0].tolist()
-    if isinstance(value, np.ndarray):
-        return value[pd.notna(value)].astype(str).tolist()
-    if isinstance(value, (list, tuple, set)):
-        return [item for item in value if item is not None]
-    return []
-
-
-def _bigquery_scalar_to_python(value):
-    if isinstance(value, pd.Series):
-        return value.iloc[0] if len(value) else None
-    return value
-
-
 def sort_dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["month"] = pd.to_datetime(df["month"], errors="coerce")
     return df.sort_values("month", ascending=False, kind="mergesort").reset_index(drop=True)
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def load_filter_options():
-    def csv_options(df):
-        return {
-            "towns": sorted(df["town"].dropna().astype(str).unique().tolist()),
-            "flat_types": sorted(df["flat_type"].dropna().astype(str).unique().tolist()),
-            "min_price": int(df["resale_price"].min()),
-            "max_price": int(df["resale_price"].max()),
-            "date_min": df["month"].min().date(),
-            "date_max": df["month"].max().date(),
-            "source": "CSV",
-        }
+def load_filter_options(df: pd.DataFrame, source: str):
+    valid_towns = df["town"].dropna().astype(str)
+    valid_towns = valid_towns[valid_towns.str.strip() != ""]
+    valid_flat_types = df["flat_type"].dropna().astype(str)
+    valid_flat_types = valid_flat_types[valid_flat_types.str.strip() != ""]
+    valid_prices = pd.to_numeric(df["resale_price"], errors="coerce").dropna()
+    valid_months = pd.to_datetime(df["month"], errors="coerce").dropna()
 
-    try:
-        client, project_id, dataset_id, table_id = get_bigquery_client()
-        table_ref = f"{project_id}.{dataset_id}.{table_id}"
-        query = f"""
-            SELECT
-                ARRAY_AGG(DISTINCT town) AS towns,
-                ARRAY_AGG(DISTINCT flat_type) AS flat_types,
-                MIN(resale_price) AS min_price,
-                MAX(resale_price) AS max_price,
-                MIN(month) AS date_min,
-                MAX(month) AS date_max
-            FROM `{table_ref}`
-            WHERE town IS NOT NULL
-              AND TRIM(town) <> ''
-              AND flat_type IS NOT NULL
-              AND TRIM(flat_type) <> ''
-        """
+    if valid_towns.empty or valid_flat_types.empty or valid_prices.empty or valid_months.empty:
+        raise ValueError("Loaded data does not contain enough values for filter options")
 
-        row = client.query(query).to_dataframe().iloc[0]
-        towns = _bigquery_array_to_list(row["towns"])
-        flat_types = _bigquery_array_to_list(row["flat_types"])
-        min_price = _bigquery_scalar_to_python(row["min_price"])
-        max_price = _bigquery_scalar_to_python(row["max_price"])
-        date_min = _bigquery_scalar_to_python(row["date_min"])
-        date_max = _bigquery_scalar_to_python(row["date_max"])
-        if (
-            not towns
-            or not flat_types
-            or min_price is None
-            or max_price is None
-            or date_min is None
-            or date_max is None
-        ):
-            raise ValueError("BigQuery filter option query returned empty metadata")
-        return {
-            "towns": sorted(towns),
-            "flat_types": sorted(flat_types),
-            "min_price": int(min_price),
-            "max_price": int(max_price),
-            "date_min": pd.to_datetime(date_min).date(),
-            "date_max": pd.to_datetime(date_max).date(),
-            "source": "BigQuery",
-        }
-
-    except Exception as bq_error:
-        st.info(f"ℹ️ BigQuery filter options unavailable; using CSV fallback: {bq_error}")
-        csv_path = get_csv_path()
-        if not os.path.exists(csv_path):
-            st.error(f"❌ CSV file not found: {csv_path}")
-            st.stop()
-
-        df = pd.read_csv(
-            csv_path,
-            usecols=[
-                "town",
-                "flat_type",
-                "resale_price",
-                "month",
-            ],
-        )
-        if 'month' in df.columns:
-            df["month"] = pd.to_datetime(df["month"])
-        return csv_options(df)
+    return {
+        "towns": sorted(valid_towns.unique().tolist()),
+        "flat_types": sorted(valid_flat_types.unique().tolist()),
+        "min_price": int(valid_prices.min()),
+        "max_price": int(valid_prices.max()),
+        "date_min": valid_months.min().date(),
+        "date_max": valid_months.max().date(),
+        "source": source,
+    }
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -335,8 +260,8 @@ def load_data():
 df, data_meta = load_data()
 df = sort_dataframe_for_display(df)
 
-# Preload filter options once, with BigQuery-first fallback to CSV.
-filter_options = load_filter_options()
+# Build filter options from the same dataframe used by the dashboard.
+filter_options = load_filter_options(df, data_meta["source"])
 
 # Sidebar refresh button to force re-load (clears the cache)
 if st.sidebar.button("🔄 Refresh Data"):
