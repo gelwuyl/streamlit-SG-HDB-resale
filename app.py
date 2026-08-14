@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -149,6 +150,10 @@ def get_csv_path():
 def _bigquery_array_to_list(value):
     if isinstance(value, pd.Series):
         return value.dropna().astype(str).tolist()
+    if isinstance(value, pd.DataFrame):
+        return value.dropna().astype(str).iloc[:, 0].tolist()
+    if isinstance(value, np.ndarray):
+        return value[pd.notna(value)].astype(str).tolist()
     if isinstance(value, (list, tuple, set)):
         return [item for item in value if item is not None]
     return []
