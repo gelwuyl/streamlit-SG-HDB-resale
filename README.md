@@ -27,7 +27,8 @@ Live app: [https://gel-sg-hdb-resale.streamlit.app/](https://gel-sg-hdb-resale.s
 ┌─────────────────────────────────────────────────────────────┐
 │                  Streamlit Dashboard                        │
 │  • 1. Try BigQuery (primary)                                │
-│  • 2. Fallback to CSV (if BigQuery fails)                   │
+│  • 2. Cache BigQuery data for faster reloads (1 hour)        │
+│  • 3. Fallback to CSV (if BigQuery fails)                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -65,13 +66,7 @@ streamlit-SGhdbresale/
 ├── requirements.txt       # Python dependencies
 └── README.md             # This file
 ```
-
-## 🛠️ Setup Instructions
-
-1. **Install dependencies**: `pip install -r requirements.txt`
-2. **Configure Streamlit secrets**: Add `gcp_service_account`, `dataset_id`, `table_id` to `.streamlit/secrets.toml`
-3. **Run locally**: `streamlit run app.py`
-4. **Deploy to Streamlit Cloud**: Push to GitHub, connect, configure secrets
+<br>
 
 ## ☁️ Cloud Pipeline (GitHub Action)
 
@@ -85,23 +80,27 @@ GitHub Action (weekly)
         └── 3. Update → local CSV (dedup, no duplicates)
               └── Commit CSV back to repo
 ```
+<br>
 
-### Setup
+## 🛠️ Setup Instructions
 
-Add these GitHub Secrets (Settings → Secrets and variables → Actions):
+1. **Install dependencies**: `pip install -r requirements.txt`
+2. **Configure Streamlit secrets**: Add `gcp_service_account`, `dataset_id`, `table_id` to `.streamlit/secrets.toml`
+3. **Run locally**: `streamlit run app.py`
+4. **Deploy to Streamlit Cloud**: Push to GitHub, connect, configure secrets
+
+For the GitHub Action, add these repository secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Description |
 |--------|-------------|
 | `GCP_SERVICE_ACCOUNT_JSON` | Full service account JSON (inline) |
-| `GCP_PROJECT_ID` | GCP project id |
-| `GCP_DATASET_ID` | BigQuery dataset (default: `resale`) |
-| `GCP_TABLE_ID` | BigQuery table (default: `public_resale_flat_prices_from_jan_2017`) |
+| `GCP_PROJECT_ID` | GCP project ID |
+| `GCP_DATASET_ID` | BigQuery dataset, default: `resale` |
+| `GCP_TABLE_ID` | BigQuery table, default: `public_resale_flat_prices_from_jan_2017` |
 
-### Local Testing
+To run the BigQuery update script locally:
 
 ```bash
 export GOOGLE_CREDENTIALS_PATH=/path/to/service-account.json
 python scripts/update_bigquery.py
 ```
-
-The script updates both BigQuery and the local CSV file.
