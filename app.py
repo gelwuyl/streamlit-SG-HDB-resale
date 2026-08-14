@@ -220,7 +220,7 @@ def load_filter_options():
         }
 
     except Exception as bq_error:
-        st.warning(f"⚠️ Could not preload filter options from BigQuery: {bq_error}")
+        st.info(f"ℹ️ BigQuery filter options unavailable; using CSV fallback: {bq_error}")
         csv_path = get_csv_path()
         if not os.path.exists(csv_path):
             st.error(f"❌ CSV file not found: {csv_path}")
