@@ -108,11 +108,14 @@ def _normalize_bigquery_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df["month"] = pd.to_datetime(df["month"], errors="coerce")
 
-    for numeric_col in ["resale_price", "floor_area_sqm", "remaining_lease"]:
+    for numeric_col in ["resale_price", "floor_area_sqm"]:
         df[numeric_col] = pd.to_numeric(df[numeric_col], errors="coerce")
 
     if "lease_commence_date" in df.columns:
         df["lease_commence_date"] = df["lease_commence_date"].astype("string")
+
+    if "remaining_lease" in df.columns:
+        df["remaining_lease"] = df["remaining_lease"].astype("string")
 
     return df[expected_columns]
 
