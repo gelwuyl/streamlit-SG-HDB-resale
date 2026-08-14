@@ -146,6 +146,20 @@ def get_csv_path():
     )
 
 
+def _bigquery_array_to_list(value):
+    if isinstance(value, pd.Series):
+        return value.dropna().astype(str).tolist()
+    if isinstance(value, (list, tuple, set)):
+        return [item for item in value if item is not None]
+    return []
+
+
+def _bigquery_scalar_to_python(value):
+    if isinstance(value, pd.Series):
+        return value.iloc[0] if len(value) else None
+    return value
+
+
 def sort_dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["month"] = pd.to_datetime(df["month"], errors="coerce")
@@ -180,13 +194,21 @@ def load_filter_options():
         """
 
         row = client.query(query).to_dataframe().iloc[0]
+        towns = _bigquery_array_to_list(row["towns"])
+        flat_types = _bigquery_array_to_list(row["flat_types"])
+        min_price = _bigquery_scalar_to_python(row["min_price"])
+        max_price = _bigquery_scalar_to_python(row["max_price"])
+        date_min = _bigquery_scalar_to_python(row["date_min"])
+        date_max = _bigquery_scalar_to_python(row["date_max"])
+        if min_price is None or max_price is None or date_min is None or date_max is None:
+            raise ValueError("BigQuery filter option query returned empty metadata")
         return {
-            "towns": sorted(row["towns"] or []),
-            "flat_types": sorted(row["flat_types"] or []),
-            "min_price": int(row["min_price"]),
-            "max_price": int(row["max_price"]),
-            "date_min": pd.to_datetime(row["date_min"]).date(),
-            "date_max": pd.to_datetime(row["date_max"]).date(),
+            "towns": sorted(towns),
+            "flat_types": sorted(flat_types),
+            "min_price": int(min_price),
+            "max_price": int(max_price),
+            "date_min": pd.to_datetime(date_min).date(),
+            "date_max": pd.to_datetime(date_max).date(),
             "source": "BigQuery",
         }
 
