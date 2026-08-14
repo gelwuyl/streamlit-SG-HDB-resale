@@ -27,10 +27,18 @@ Live app: [https://gel-sg-hdb-resale.streamlit.app/](https://gel-sg-hdb-resale.s
 ┌─────────────────────────────────────────────────────────────┐
 │                  Streamlit Dashboard                        │
 │  • 1. Try BigQuery (primary)                                │
-│  • 2. Cache BigQuery data for faster reloads (1 hour)        │
+│  • 2. Cache BigQuery data for faster reloads (1 hour)       │
 │  • 3. Fallback to CSV (if BigQuery fails)                   │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## 🚀 Features
+
+- **Interactive Dashboard**: Filter by town, flat type, price range, and date
+- **Key Metrics**: Transaction count, average/median prices, floor area
+- **Visualizations**: Average resale price by town, transactions by flat type, monthly price trends
+- **Data Sources**: BigQuery (primary) → CSV fallback
+- **Real-time Updates**: Data refreshes on each app run
 
 ## 📋 Current Status
 
@@ -41,14 +49,6 @@ Live app: [https://gel-sg-hdb-resale.streamlit.app/](https://gel-sg-hdb-resale.s
 | **GitHub Action** | ✅ Cloud | Weekly scheduled API → BigQuery + CSV |
 | **BigQuery Data** | ✅ Available | Table exists |
 | **Streamlit App** | ✅ Functional | BigQuery primary, CSV fallback |
-
-## 🚀 Features
-
-- **Interactive Dashboard**: Filter by town, flat type, price range, and date
-- **Key Metrics**: Transaction count, average/median prices, floor area
-- **Visualizations**: Average resale price by town, transactions by flat type, monthly price trends
-- **Data Sources**: BigQuery (primary) → CSV fallback
-- **Real-time Updates**: Data refreshes on each app run
 
 ## 📁 Project Structure
 
